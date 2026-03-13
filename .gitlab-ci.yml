@@ -6,7 +6,8 @@ stages:
 
 variables:
   PYTHON_IMAGE: "python:3.12-slim"
-  DOCKER_IMAGE: "registry.gitlab.com/$CI_PROJECT_PATH"
+  DOCKER_IMAGE: "$CI_REGISTRY_IMAGE"
+
 
 .python-base:
   image: $PYTHON_IMAGE
