@@ -4,13 +4,6 @@ sqlalchemy>=2.0
 asyncpg
 redis
 fastapi-cache2
-pydantic
-python-jose
-passlib
-bcrypt
-python-multipart
-lark
-pytest
-pytest-asyncio
-httpx
+python-jose[cryptography]
+passlib[bcrypt]
 email-validator

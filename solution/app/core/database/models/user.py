@@ -9,8 +9,8 @@ from app.core.database.models.base import Base, TimestampMixin
 
 
 class UserRole(str, enum.Enum):
-    USER = "user"
-    ADMIN = "admin"
+    USER = "USER"
+    ADMIN = "ADMIN"
 
 
 class User(TimestampMixin, Base):
