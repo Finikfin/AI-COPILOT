@@ -1,12 +1,9 @@
-import uuid
 import sys
 import asyncio
 import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from fastapi.exceptions import RequestValidationError
-from starlette.exceptions import HTTPException
 
 from fastapi_cache import FastAPICache
 from fastapi_cache.backends.redis import RedisBackend
@@ -16,6 +13,7 @@ from app.api.ping.router import router as health_router
 
 from app.api.auth.register import router as auth_router
 from app.api.auth.login import router as login_router
+from app.api.ping.router import router as ping_router
 
 from app.utils.error_handlers import validation_exception_handler, http_exception_handler
 from app.core.database.init import init_db
@@ -70,3 +68,4 @@ app.include_router(health_router, prefix="/api")
 
 app.include_router(auth_router, prefix="/api")
 app.include_router(login_router, prefix="/api")
+app.include_router(ping_router)

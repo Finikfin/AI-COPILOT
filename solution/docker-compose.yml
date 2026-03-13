@@ -1,11 +1,13 @@
 services:
   api:
+    image: ${DOCKER_IMAGE}:${TAG:-latest}
     build:
       context: .
       dockerfile: Dockerfile
+
     restart: always
     ports:
-      - "8001:8000"
+      - "80:8000"
     environment:
       - DATABASE_URL=postgresql+asyncpg://user:password@db:5432/dbname
       - REDIS_URL=redis://redis:6379/0
