@@ -12,10 +12,12 @@ from fastapi_cache import FastAPICache
 from fastapi_cache.backends.redis import RedisBackend
 from redis import asyncio as aioredis
 
+from app.api.ping.router import router as health_router
+
 from app.api.auth.register import router as auth_router
 from app.api.auth.login import router as login_router
 
-# from app.utils.error_handlers import validation_exception_handler, http_exception_handler
+from app.utils.error_handlers import validation_exception_handler, http_exception_handler
 from app.core.database.init import init_db
 
 
@@ -51,18 +53,20 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
-# @app.middleware("http")
-# async def add_trace_id(request, call_next):
-#     trace_id = request.headers.get("X-Trace-Id") or str(uuid.uuid4())
-#     request.state.traceId = trace_id
+@app.middleware("http")
+async def add_trace_id(request, call_next):
+    trace_id = request.headers.get("X-Trace-Id") or str(uuid.uuid4())
+    request.state.traceId = trace_id
     
-#     response = await call_next(request)
-#     response.headers["X-Trace-Id"] = trace_id
-#     return response
+    response = await call_next(request)
+    response.headers["X-Trace-Id"] = trace_id
+    return response
 
 
-# app.add_exception_handler(RequestValidationError, validation_exception_handler)
-# app.add_exception_handler(HTTPException, http_exception_handler)
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
+app.add_exception_handler(HTTPException, http_exception_handler)
+
+app.include_router(health_router, prefix="/api")
 
 app.include_router(auth_router, prefix="/api")
 app.include_router(login_router, prefix="/api")
