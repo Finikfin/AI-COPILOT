@@ -1,6 +1,6 @@
 from httpx import AsyncClient
 import pytest
-from app.main import app
+from app.api.ping.router import router as ping_router
 
 @pytest.mark.asyncio
 async def test_ping():
