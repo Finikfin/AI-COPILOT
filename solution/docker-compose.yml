@@ -7,7 +7,7 @@ services:
 
     restart: always
     ports:
-      - "80:8001"
+      - "80:8000"
     environment:
       - DATABASE_URL=postgresql+asyncpg://user:password@db:5432/dbname
       - REDIS_URL=redis://redis:6379/0
