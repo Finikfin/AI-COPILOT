@@ -1,10 +1,9 @@
 services:
   api:
-    build: .
+    image: ${DOCKER_IMAGE}:${TAG:-latest}
+    restart: always
     ports:
       - "8000:8000"
-    volumes:
-      - .:/app
     environment:
       - DATABASE_URL=postgresql+asyncpg://user:password@db:5432/dbname
       - REDIS_URL=redis://redis:6379/0
@@ -13,6 +12,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+
 
   db:
     image: postgres:15-alpine
