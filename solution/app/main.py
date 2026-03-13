@@ -1,12 +1,9 @@
-import uuid
 import sys
 import asyncio
 import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from fastapi.exceptions import RequestValidationError
-from starlette.exceptions import HTTPException
 
 from fastapi_cache import FastAPICache
 from fastapi_cache.backends.redis import RedisBackend
