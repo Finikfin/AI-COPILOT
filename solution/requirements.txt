@@ -5,8 +5,8 @@ asyncpg
 redis
 fastapi-cache2
 pydantic
-python-jose
-passlib
+python-jose[cryptography]
+passlib[bcrypt]
 bcrypt
 python-multipart
 lark

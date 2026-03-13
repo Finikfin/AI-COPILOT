@@ -1,8 +1,10 @@
 services:
   api:
+    image: ${DOCKER_IMAGE}:${TAG:-latest}
     build:
       context: .
       dockerfile: Dockerfile
+
     restart: always
     ports:
       - "8001:8000"

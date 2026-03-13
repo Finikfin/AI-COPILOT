@@ -11,6 +11,7 @@ from redis import asyncio as aioredis
 
 from app.api.auth.register import router as auth_router
 from app.api.auth.login import router as login_router
+from app.api.ping.router import router as ping_router
 
 # from app.utils.error_handlers import validation_exception_handler, http_exception_handler
 from app.core.database.init import init_db
@@ -63,3 +64,4 @@ app = FastAPI(lifespan=lifespan)
 
 app.include_router(auth_router, prefix="/api")
 app.include_router(login_router, prefix="/api")
+app.include_router(ping_router)
