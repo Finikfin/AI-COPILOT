@@ -1,0 +1,6 @@
+services:
+  web:
+    image: ${DOCKER_IMAGE:-frontend-web}:${TAG:-latest}
+    restart: always
+    ports:
+      - "8080:80"
