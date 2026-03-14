@@ -12,7 +12,7 @@ from app.schemas.action_sch import ActionListItemResponse
 router = APIRouter(tags=["Actions"])
 
 
-@router.get("", response_model=list[ActionListItemResponse])
+@router.get("/", response_model=list[ActionListItemResponse])
 async def list_actions(
     method: HttpMethod | None = Query(default=None),
     source_filename: str | None = Query(default=None),
