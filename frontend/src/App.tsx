@@ -17,15 +17,12 @@
 import { Toaster } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { Layout } from "@/components/layout/Layout";
-import Dashboard from "./pages/Dashboard";
-import GraphEditor from "./pages/GraphEditor";
-import Metrics from "./pages/Metrics";
-import DataSources from "./pages/DataSources";
-import Settings from "./pages/Settings";
-import Help from "./pages/Help";
+import Actions from "./pages/Actions";
+import Capabilities from "./pages/Capabilities";
+import Pipelines from "./pages/Pipelines";
 import NotFound from "./pages/NotFound";
 
 /**
@@ -48,23 +45,17 @@ const AppRoutes = () => {
     <Routes>
       {/* Main layout wrapper for all authenticated pages */}
       <Route path="/" element={<Layout />}>
-        {/* Dashboard - Main overview page */}
-        <Route index element={<Dashboard />} />
+        {/* Redirect base path to actions */}
+        <Route index element={<Navigate to="/actions" replace />} />
         
-        {/* Graph Editor - Interactive graph visualization and editing */}
-        <Route path="editor" element={<GraphEditor />} />
+        {/* Actions - Technical API methods */}
+        <Route path="actions" element={<Actions />} />
         
-        {/* Metrics - Detailed metrics and analytics */}
-        <Route path="metrics" element={<Metrics />} />
+        {/* Capabilities - Business logic skills */}
+        <Route path="capabilities" element={<Capabilities />} />
         
-        {/* Data Sources - Connection management for monitoring systems */}
-        <Route path="datasources" element={<DataSources />} />
-        
-        {/* Settings - Application configuration and preferences */}
-        <Route path="settings" element={<Settings />} />
-        
-        {/* Help - Documentation and support */}
-        <Route path="help" element={<Help />} />
+        {/* Pipelines - AI-generated workflows (formerly Graph Editor) */}
+        <Route path="pipelines" element={<Pipelines />} />
       </Route>
       
       {/* 404 page for unmatched routes */}
