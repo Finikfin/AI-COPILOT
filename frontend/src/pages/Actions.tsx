@@ -44,9 +44,10 @@ const Actions: React.FC = () => {
   const [actions, setActions] = useState([]);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
 
-  const filteredActions = actions.filter(action =>
-    action.path.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    action.tag.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredActions = actions.filter((action: any) =>
+    action.path?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (action.tags && action.tags[0]?.toLowerCase().includes(searchTerm.toLowerCase())) ||
+    action.summary?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const getMethodColor = (method: string) => {
@@ -120,11 +121,11 @@ const Actions: React.FC = () => {
                     </TableCell>
                     <TableCell>
                       <span className="text-xs px-2 py-1 rounded-full bg-secondary text-secondary-foreground border border-border">
-                        {action.tag}
+                        {action.tags?.[0] || action.source_filename?.split('.')[0] || 'General'}
                       </span>
                     </TableCell>
                     <TableCell className="hidden md:table-cell text-muted-foreground text-sm max-w-xs truncate">
-                      {action.description}
+                      {action.summary || action.description}
                     </TableCell>
                     <TableCell>
                       <DropdownMenu>
@@ -176,7 +177,7 @@ const Actions: React.FC = () => {
 
         {/* Pagination Placeholder */}
         <div className="p-4 border-t border-border bg-muted/30 flex items-center justify-between text-xs text-muted-foreground">
-          <span>Показано {filteredActions.length} из {MOCK_ACTIONS.length} действий</span>
+          <span>Показано {filteredActions.length} из {actions.length} действий</span>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" className="h-7 text-xs border-border" disabled>Back</Button>
             <Button variant="outline" size="sm" className="h-7 text-xs border-border" disabled>Next</Button>
@@ -187,8 +188,10 @@ const Actions: React.FC = () => {
         isOpen={isImportModalOpen}
         onClose={() => setIsImportModalOpen(false)}
         onImport={(data) => {
-          console.log('Imported data:', data);
-          // Here logic to update actions state
+          if (data && data.actions) {
+            setActions(data.actions);
+            toast.success(`Загружено ${data.created_count || data.actions.length} методов`);
+          }
         }}
       />
     </div>
