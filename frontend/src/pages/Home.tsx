@@ -28,7 +28,7 @@ const Home: React.FC = () => {
     e.preventDefault();
     if (!chatMessage.trim()) return;
 
-    const dialogId = crypto.randomUUID();
+    const dialogId = "11111111-1111-1111-1111-111111111111"
 
     // Send message to generate pipeline endpoint
     await generatePipeline({
@@ -89,8 +89,8 @@ const Home: React.FC = () => {
                     size="icon"
                     disabled={isChatDisabled}
                     className={`h-10 w-10 rounded-xl transition-transform active:scale-95 ${isChatDisabled
-                        ? 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
-                        : 'bg-primary hover:bg-primary/90'
+                      ? 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
+                      : 'bg-primary hover:bg-primary/90'
                       }`}
                   >
                     <Send className="h-5 w-5" />
