@@ -30,6 +30,11 @@ const navigationItems = [
     name: 'Capabilities',
     href: '/capabilities',
     icon: Zap
+  },
+  {
+    name: 'Pipelines',
+    href: '/pipelines',
+    icon: Workflow
   }
 ];
 
