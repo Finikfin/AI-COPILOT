@@ -1,6 +1,6 @@
 import asyncio
 import os
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.models import Base, User, UserRole
 from app.core.database.session import SessionLocal, engine
@@ -10,6 +10,15 @@ from app.utils.hashing import hash_password
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(
+            text("ALTER TABLE actions ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE")
+        )
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_actions_method_path ON actions (method, path)")
+        )
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_actions_is_deleted ON actions (is_deleted)")
+        )
 
     async with SessionLocal() as session:
         admin_email = os.getenv("ADMIN_EMAIL")

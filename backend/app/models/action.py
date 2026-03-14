@@ -2,7 +2,7 @@ import enum
 import uuid
 from typing import Any
 
-from sqlalchemy import Enum, String, Text
+from sqlalchemy import Boolean, Enum, Index, String, Text
 from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -24,7 +24,11 @@ class Action(TimestampMixin, Base):
     Технический слой.
     Хранит детали одного эндпоинта, импортированного из OpenAPI/Swagger файла.
     """
+
     __tablename__ = "actions"
+    __table_args__ = (
+        Index("ix_actions_method_path", "method", "path"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -32,7 +36,6 @@ class Action(TimestampMixin, Base):
         default=uuid.uuid4,
     )
 
-    # --- Идентификация внутри спецификации ---
     operation_id: Mapped[str | None] = mapped_column(
         String(255),
         nullable=True,
@@ -40,7 +43,6 @@ class Action(TimestampMixin, Base):
         comment="operationId из OpenAPI-спецификации",
     )
 
-    # --- HTTP-детали ---
     method: Mapped[HttpMethod] = mapped_column(
         Enum(HttpMethod, name="http_method"),
         nullable=False,
@@ -73,7 +75,6 @@ class Action(TimestampMixin, Base):
         comment="Список тегов из OpenAPI для группировки",
     )
 
-    # --- JSON-схемы ---
     parameters_schema: Mapped[dict[str, Any] | None] = mapped_column(
         JSON,
         nullable=True,
@@ -99,4 +100,12 @@ class Action(TimestampMixin, Base):
         JSON,
         nullable=True,
         comment="Оригинальный JSON-фрагмент операции из спецификации",
+    )
+    is_deleted: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+        index=True,
+        comment="Мягкое удаление Action",
     )
