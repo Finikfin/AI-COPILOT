@@ -79,16 +79,7 @@ const Capabilities: React.FC = () => {
             Бизнес-навыки, созданные путем объединения нескольких API Actions. Обучены для понимания вашим ИИ.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-          <Button className="flex-1 sm:flex-none gap-2 bg-primary text-primary-foreground hover:bg-primary/90">
-            <Plus className="h-4 w-4" />
-            Create Skill
-          </Button>
-          <Button variant="outline" className="flex-1 sm:flex-none gap-2 border-border hover:bg-accent order-first sm:order-none">
-            <BrainCircuit className="h-4 w-4" />
-            AI Suggest
-          </Button>
-        </div>
+        {/* Actions removed as requested */}
       </div>
 
       {/* Search/Filters */}
@@ -102,28 +93,29 @@ const Capabilities: React.FC = () => {
         </div>
       </div>
 
-      {/* Grid Section */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6 overflow-auto pb-10">
+      {/* Grid Section - Added flex-1 and min-h-0 for proper scrolling behavior */}
+      <div className="flex-1 min-h-0 overflow-auto">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4 pb-10">
         {MOCK_BIO_CAPABILITIES.map((cap) => (
-          <Card key={cap.id} className="bg-card border-border hover:border-primary/50 transition-all group overflow-hidden flex flex-col h-full">
-            <CardHeader className="p-4 sm:p-6 pb-2 sm:pb-3">
+          <Card key={cap.id} className="bg-card border-border hover:border-primary/50 transition-all group overflow-hidden flex flex-col h-full min-h-[280px]">
+            <CardHeader className="p-4 pb-2">
               <div className="flex items-start justify-between">
-                <div className="bg-primary/10 p-2 rounded-lg mb-2">
-                  <Zap className="h-5 w-5 text-primary" />
+                <div className="bg-primary/10 p-1.5 rounded-lg mb-2 shrink-0">
+                  <Zap className="h-4 w-4 text-primary" />
                 </div>
-                <Badge variant="outline" className="text-[10px] uppercase font-bold border-border bg-muted/50">
+                <Badge variant="outline" className="text-[9px] px-1.5 py-0 uppercase font-bold border-border bg-muted/50">
                   {cap.status}
                 </Badge>
               </div>
-              <CardTitle className="text-lg text-foreground group-hover:text-primary transition-colors">
+              <CardTitle className="text-base text-foreground group-hover:text-primary transition-colors">
                 {cap.name}
               </CardTitle>
-              <Badge className="w-fit mt-1 bg-secondary text-secondary-foreground hover:bg-secondary border-border font-normal">
+              <Badge className="w-fit mt-1 text-[10px] px-2 py-0 bg-secondary text-secondary-foreground hover:bg-secondary border-border font-normal">
                 {cap.aiTag}
               </Badge>
             </CardHeader>
-            <CardContent className="p-4 sm:p-6 pt-0 sm:pt-0 flex-1">
-              <p className="text-sm text-muted-foreground leading-relaxed line-clamp-3">
+            <CardContent className="p-4 pt-0 flex-1">
+              <p className="text-[13px] text-muted-foreground leading-relaxed line-clamp-3">
                 {cap.description}
               </p>
               
@@ -138,13 +130,13 @@ const Capabilities: React.FC = () => {
                 </div>
               </div>
             </CardContent>
-            <CardFooter className="p-3 sm:p-4 border-t border-border bg-muted/20">
+            <CardFooter className="p-3 border-t border-border bg-muted/20">
               <div className="flex items-center justify-between w-full">
-                <Button variant="ghost" size="sm" className="text-xs text-foreground hover:text-primary">
+                <Button variant="ghost" size="sm" className="h-7 px-2 text-[11px] text-foreground hover:text-primary">
                   Edit Mapping
                 </Button>
-                <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                  <Settings2 className="h-4 w-4 text-muted-foreground" />
+                <Button variant="ghost" size="sm" className="h-7 w-7 p-0">
+                  <Settings2 className="h-3.5 w-3.5 text-muted-foreground" />
                 </Button>
               </div>
             </CardFooter>
@@ -152,13 +144,14 @@ const Capabilities: React.FC = () => {
         ))}
 
         {/* Create Placeholder Card */}
-        <button className="border-2 border-dashed border-border rounded-xl flex flex-col items-center justify-center p-6 sm:p-8 hover:border-primary/30 hover:bg-primary/5 transition-all text-muted-foreground hover:text-primary group min-h-[280px] h-full">
-          <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center mb-4 group-hover:bg-primary/10">
-            <Plus className="h-6 w-6" />
+        <button className="border-2 border-dashed border-border rounded-xl flex flex-col items-center justify-center p-4 hover:border-primary/30 hover:bg-primary/5 transition-all text-muted-foreground hover:text-primary group min-h-[280px] h-full">
+          <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center mb-3 group-hover:bg-primary/10">
+            <Plus className="h-5 w-5" />
           </div>
-          <span className="font-medium">Build New Capability</span>
-          <span className="text-xs mt-1">Combine multiple API methods</span>
+          <span className="text-sm font-medium">Build New Capability</span>
+          <span className="text-[11px] mt-1">Combine multiple API methods</span>
         </button>
+        </div>
       </div>
     </div>
   );

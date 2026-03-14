@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import re
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Action, Capability
-from app.utils.ollama_client import build_capability_from_action
 
 
 class CapabilityService:
@@ -18,7 +19,7 @@ class CapabilityService:
         capabilities: list[Capability] = []
 
         for action in actions:
-            capability_payload = build_capability_from_action(action)
+            capability_payload = CapabilityService._build_capability_payload(action)
             capabilities.append(
                 Capability(
                     action_id=action.id,
@@ -79,3 +80,84 @@ class CapabilityService:
 
     async def get_capability(self, capability_id: UUID) -> Capability | None:
         return await self.session.get(Capability, capability_id)
+
+    @staticmethod
+    def _build_capability_payload(action: Action) -> dict[str, Any]:
+        return {
+            "name": CapabilityService._build_capability_name(action),
+            "description": CapabilityService._build_capability_description(action),
+            "input_schema": CapabilityService._build_input_schema(action),
+            "output_schema": getattr(action, "response_schema", None),
+            "data_format": CapabilityService._build_data_format(action),
+            "llm_payload": {
+                "source": "deterministic",
+            },
+        }
+
+    @staticmethod
+    def _build_capability_name(action: Action) -> str:
+        operation_id = getattr(action, "operation_id", None)
+        if operation_id:
+            return str(operation_id)
+
+        method = getattr(action, "method", None)
+        method_value = method.value.lower() if method is not None else "call"
+        path = getattr(action, "path", "") or ""
+        normalized_path = re.sub(r"[{}]", "", path).strip("/")
+        normalized_path = re.sub(r"[^a-zA-Z0-9/]+", "_", normalized_path)
+        normalized_path = normalized_path.replace("/", "_") or "root"
+        return f"{method_value}_{normalized_path.lower()}"
+
+    @staticmethod
+    def _build_capability_description(action: Action) -> str:
+        summary = getattr(action, "summary", None)
+        description = getattr(action, "description", None)
+        operation_id = getattr(action, "operation_id", None)
+        return str(summary or description or operation_id or CapabilityService._build_capability_name(action))
+
+    @staticmethod
+    def _build_input_schema(action: Action) -> dict[str, Any] | None:
+        parameters_schema = getattr(action, "parameters_schema", None)
+        request_body_schema = getattr(action, "request_body_schema", None)
+
+        if parameters_schema and request_body_schema:
+            return {
+                "type": "object",
+                "properties": {
+                    "parameters": parameters_schema,
+                    "request_body": request_body_schema,
+                },
+            }
+        if parameters_schema:
+            return parameters_schema
+        if request_body_schema:
+            return request_body_schema
+        return None
+
+    @staticmethod
+    def _build_data_format(action: Action) -> dict[str, Any]:
+        parameters_schema = getattr(action, "parameters_schema", None) or {}
+        request_body_schema = getattr(action, "request_body_schema", None) or {}
+        response_schema = getattr(action, "response_schema", None) or {}
+
+        parameter_locations: list[str] = []
+        if isinstance(parameters_schema, dict):
+            properties = parameters_schema.get("properties", {})
+            if isinstance(properties, dict):
+                for property_schema in properties.values():
+                    if not isinstance(property_schema, dict):
+                        continue
+                    location = property_schema.get("x-parameter-location")
+                    if isinstance(location, str) and location not in parameter_locations:
+                        parameter_locations.append(location)
+
+        request_content_type = request_body_schema.get("x-content-type") if isinstance(request_body_schema, dict) else None
+        response_content_type = response_schema.get("x-content-type") if isinstance(response_schema, dict) else None
+
+        return {
+            "parameter_locations": parameter_locations,
+            "request_content_types": [request_content_type] if isinstance(request_content_type, str) else [],
+            "request_schema_type": request_body_schema.get("type") if isinstance(request_body_schema, dict) else None,
+            "response_content_types": [response_content_type] if isinstance(response_content_type, str) else [],
+            "response_schema_types": [response_schema.get("type")] if isinstance(response_schema, dict) and isinstance(response_schema.get("type"), str) else [],
+        }

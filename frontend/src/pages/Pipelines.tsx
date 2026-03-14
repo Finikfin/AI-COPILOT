@@ -4,11 +4,12 @@ import { SynthesisChat } from '@/components/shared/SynthesisChat';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Play, Settings, Database, ArrowRight, Activity, Zap } from 'lucide-react';
+import { Play, Settings, Database, Activity, Zap } from 'lucide-react';
 
 export const Pipelines: React.FC = () => {
   const location = useLocation();
   const initialMessage = location.state?.initialMessage;
+  const dialogId = location.state?.dialogId;
 
   return (
     <div className="h-full flex overflow-hidden">
@@ -21,8 +22,6 @@ export const Pipelines: React.FC = () => {
           </div>
 
           <div className="relative flex items-center justify-between gap-4 px-10">
-            {/* Nodes are connected by ArrowRight icons */}
-
             {/* Node 1: Start */}
             <Card className="relative z-10 w-52 p-4 border-primary/20 bg-card shadow-lg flex flex-col items-center gap-3">
               <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
@@ -97,6 +96,7 @@ export const Pipelines: React.FC = () => {
       <SynthesisChat
         className="w-80"
         initialMessage={initialMessage}
+        initialDialogId={dialogId}
       />
     </div>
   );

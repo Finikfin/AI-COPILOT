@@ -11,7 +11,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
-import { cn } from '@/lib/utils';
+import { cn, generateUUID } from '@/lib/utils';
+import { generatePipeline } from '@/api/chat';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -23,9 +24,15 @@ interface SynthesisChatProps {
   onSynthesize?: (prompt: string) => void;
   className?: string;
   initialMessage?: string;
+  initialDialogId?: string;
 }
 
-export const SynthesisChat: React.FC<SynthesisChatProps> = ({ onSynthesize, className, initialMessage }) => {
+export const SynthesisChat: React.FC<SynthesisChatProps> = ({ 
+  onSynthesize, 
+  className, 
+  initialMessage,
+  initialDialogId 
+}) => {
   const [messages, setMessages] = useState<Message[]>([
     { 
       role: 'assistant', 
@@ -33,6 +40,7 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({ onSynthesize, clas
     }
   ]);
   const [inputValue, setInputValue] = useState('');
+  const [dialogId] = useState<string>(initialDialogId || generateUUID());
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -48,7 +56,7 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({ onSynthesize, clas
     }
   }, [initialMessage]);
 
-  const handleSend = (overrideValue?: string) => {
+  const handleSend = async (overrideValue?: string) => {
     const valueToSend = overrideValue || inputValue;
     if (!valueToSend.trim()) return;
 
@@ -56,27 +64,49 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({ onSynthesize, clas
     setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
     setInputValue('');
 
-    // Simulate AI response
-    setTimeout(() => {
-      setMessages(prev => [...prev, { 
-        role: 'assistant', 
-        content: 'Анализирую возможности... Подбираю нужные Capabilities.',
-        isGenerating: true 
-      }]);
+    // Pre-add assistant message with loading state
+    setMessages(prev => [...prev, { 
+      role: 'assistant', 
+      content: 'Анализирую возможности...',
+      isGenerating: true 
+    }]);
 
-      setTimeout(() => {
-        setMessages(prev => {
-          const newMessages = [...prev];
-          const lastIndex = newMessages.length - 1;
-          newMessages[lastIndex] = { 
-            role: 'assistant', 
-            content: 'Я подготовил Pipeline для вашей задачи. Посмотрите на схему по центру. Все готово к запуску!' 
-          };
-          return newMessages;
-        });
-        if (onSynthesize) onSynthesize(userMessage);
-      }, 1500);
-    }, 500);
+    try {
+      // Send message to generate pipeline endpoint
+      const response = await generatePipeline({
+        dialog_id: dialogId,
+        message: userMessage,
+        user_id: null,
+        capability_ids: null
+      });
+
+      setMessages(prev => {
+        const newMessages = [...prev];
+        const lastIndex = newMessages.length - 1;
+        newMessages[lastIndex] = { 
+          role: 'assistant', 
+          content: response.message_ru || (response.status === 'success' ? 'Я подготовил Pipeline для вашей задачи.' : 'Произошла ошибка при генерации.'),
+          isGenerating: false 
+        };
+        return newMessages;
+      });
+
+      if (response.status === 'success' && onSynthesize) {
+        onSynthesize(userMessage);
+      }
+    } catch (error) {
+      console.error('Error in chat:', error);
+      setMessages(prev => {
+        const newMessages = [...prev];
+        const lastIndex = newMessages.length - 1;
+        newMessages[lastIndex] = { 
+          role: 'assistant', 
+          content: 'К сожалению, произошла ошибка сетевого соединения. Попробуйте еще раз.',
+          isGenerating: false 
+        };
+        return newMessages;
+      });
+    }
   };
 
   return (
