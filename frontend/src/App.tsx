@@ -99,7 +99,7 @@ const App = () => (
           }}
         />
         {/* Router with basename for deployment path */}
-        <BrowserRouter basename="/krok-mvp">
+        <BrowserRouter basename="/">
           <AppRoutes />
         </BrowserRouter>
       </TooltipProvider>
