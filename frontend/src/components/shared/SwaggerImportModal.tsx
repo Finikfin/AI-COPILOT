@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -32,6 +32,18 @@ export const SwaggerImportModal: React.FC<SwaggerImportModalProps> = ({
   const [isImporting, setIsImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Reset state when modal is closed
+  useEffect(() => {
+    if (!isOpen) {
+      setSelectedFile(null);
+      setSpec('');
+      setIsImporting(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  }, [isOpen]);
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -55,17 +67,17 @@ export const SwaggerImportModal: React.FC<SwaggerImportModalProps> = ({
       reader.onload = async (e) => {
         const content = e.target?.result as string;
 
-          try {
-            const result = await ingestSwagger('file', content, selectedFile.name);
-            toast.success(`Файл ${selectedFile.name} успешно импортирован на сервер`);
-            onImport(result);
-            onClose();
-          } catch (error: any) {
-            toast.error(error.message || 'Ошибка при отправке файла на сервер');
-            console.error(error);
-          } finally {
-            setIsImporting(false);
-          }
+        try {
+          const result = await ingestSwagger('file', content, selectedFile.name);
+          toast.success(`Файл ${selectedFile.name} успешно импортирован на сервер`);
+          onImport(result);
+          onClose();
+        } catch (error: any) {
+          toast.error(error.message || 'Ошибка при отправке файла на сервер');
+          console.error(error);
+        } finally {
+          setIsImporting(false);
+        }
       };
       reader.readAsText(selectedFile);
     } catch (error) {
