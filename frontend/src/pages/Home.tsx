@@ -17,7 +17,7 @@ const Home: React.FC = () => {
   const { actions, addActions } = useActionsContext();
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isResultsModalOpen, setIsResultsModalOpen] = useState(false);
-  const [importResults, setImportResults] = useState<{ success_actions: Action[], failed_actions: any[] } | null>(null);
+  const [importResults, setImportResults] = useState<{ succeeded_actions: Action[], failed_actions: any[] } | null>(null);
   const [chatMessage, setChatMessage] = useState('');
   const navigate = useNavigate();
 
@@ -130,15 +130,15 @@ const Home: React.FC = () => {
         isOpen={isImportModalOpen}
         onClose={() => setIsImportModalOpen(false)}
         onImport={(data) => {
-          if (data && (data.success_actions || data.actions)) {
-            const successList = data.success_actions || data.actions || [];
+          if (data && (data.succeeded_actions || data.actions)) {
+            const successList = data.succeeded_actions || data.actions || [];
             const failedList = data.failed_actions || [];
             
             // Update global context with successful actions
             addActions(successList);
 
             setImportResults({
-              success_actions: successList,
+              succeeded_actions: successList,
               failed_actions: failedList
             });
             setIsResultsModalOpen(true);
@@ -151,7 +151,7 @@ const Home: React.FC = () => {
         onClose={() => {
           setIsResultsModalOpen(false);
           // Redirect to actions page after closing results if there were successes
-          if (importResults && importResults.success_actions.length > 0) {
+          if (importResults && importResults.succeeded_actions.length > 0) {
             navigate('/actions');
           }
         }}
