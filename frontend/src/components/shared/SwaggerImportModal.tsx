@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label';
 import { FileCode, Upload, Loader2, FileJson, CheckCircle2 } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
+import { ingestSwagger } from '@/api/actions';
 
 interface SwaggerImportModalProps {
   isOpen: boolean;
@@ -55,23 +56,12 @@ export const SwaggerImportModal: React.FC<SwaggerImportModalProps> = ({
         const content = e.target?.result as string;
 
         try {
-          const formData = new FormData();
-          const fileBlob = new Blob([content], { type: selectedFile.type });
-          formData.append('file', fileBlob, selectedFile.name);
-
-          const response = await fetch('/api/v1/actions/ingest', {
-            method: 'POST',
-            body: formData,
-          });
-
-          if (!response.ok) throw new Error('Failed to import');
-
-          const result = await response.json();
+          const result = await ingestSwagger('file', content, selectedFile.name);
           toast.success(`Файл ${selectedFile.name} успешно импортирован на сервер`);
           onImport(result);
           onClose();
-        } catch (error) {
-          toast.error('Ошибка при отправке файла на сервер');
+        } catch (error: any) {
+          toast.error(error.message || 'Ошибка при отправке файла на сервер');
           console.error(error);
         } finally {
           setIsImporting(false);
@@ -92,23 +82,12 @@ export const SwaggerImportModal: React.FC<SwaggerImportModalProps> = ({
 
     setIsImporting(true);
     try {
-      const formData = new FormData();
-      const specBlob = new Blob([spec], { type: 'application/json' });
-      formData.append('file', specBlob, 'manual_import.json');
-
-      const response = await fetch('/api/v1/actions/ingest', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) throw new Error('Failed to import');
-
-      const result = await response.json();
+      const result = await ingestSwagger('manual', spec);
       toast.success('Методы успешно импортированы на сервер');
       onImport(result);
       onClose();
-    } catch (error) {
-      toast.error('Ошибка при отправке спецификации на сервер');
+    } catch (error: any) {
+      toast.error(error.message || 'Ошибка при отправке спецификации на сервер');
       console.error(error);
     } finally {
       setIsImporting(false);
