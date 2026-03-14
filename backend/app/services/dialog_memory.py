@@ -38,7 +38,10 @@ class DialogMemoryService:
         current_messages.append({"role": role, "content": content})
         await redis.set(messages_key, json.dumps(current_messages, ensure_ascii=False), ex=self.ttl_seconds)
 
-        summary = await summarize_dialog_text(current_messages)
+        try:
+            summary = await summarize_dialog_text(current_messages)
+        except Exception:
+            summary = None
         if summary is None:
             summary = self._fallback_summary(current_messages)
         await redis.set(summary_key, summary, ex=self.ttl_seconds)

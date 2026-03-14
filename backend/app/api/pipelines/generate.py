@@ -17,10 +17,24 @@ async def generate_pipeline(
     session: AsyncSession = Depends(get_session),
 ):
     service = PipelineGenerationService(session)
-    result = await service.generate(
-        dialog_id=payload.dialog_id,
-        message=payload.message,
-        user_id=payload.user_id,
-        capability_ids=payload.capability_ids,
-    )
+    try:
+        result = await service.generate(
+            dialog_id=payload.dialog_id,
+            message=payload.message,
+            user_id=payload.user_id,
+            capability_ids=payload.capability_ids,
+        )
+    except Exception as exc:
+        if "ollama" in str(exc).lower():
+            result = {
+                "status": "cannot_build",
+                "message_ru": "Не удалось обратиться к локальной модели Ollama. Проверьте OLLAMA_HOST/OLLAMA_MODEL и повторите запрос.",
+                "pipeline_id": None,
+                "nodes": [],
+                "edges": [],
+                "missing_requirements": ["ollama_unavailable"],
+                "context_summary": None,
+            }
+        else:
+            raise
     return PipelineGenerateResponse(**result)

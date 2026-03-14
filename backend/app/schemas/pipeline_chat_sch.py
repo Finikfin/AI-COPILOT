@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 class PipelineGraphNode(BaseModel):
     id: str
     capability_id: UUID
+    action_id: UUID
     label: str
     description: str | None = None
     input_mapping: dict[str, Any] | None = None

@@ -224,6 +224,7 @@ curl -X POST "http://localhost:8000/api/v1/pipelines/generate" \
     {
       "id": "node_1",
       "capability_id": "492b301c-1073-4ae5-aa24-b6ec447152f5",
+      "action_id": "e4b0bcb6-6a8c-4b0a-8e18-3f44b5f7d1c2",
       "label": "Получить недавних пользователей",
       "description": "Чтение списка пользователей для кампании",
       "input_mapping": null,
@@ -235,6 +236,7 @@ curl -X POST "http://localhost:8000/api/v1/pipelines/generate" \
     {
       "id": "node_2",
       "capability_id": "b5f3eee3-5229-4d43-ad5f-cb7a9c864c82",
+      "action_id": "96f0bc8f-e294-46a9-9a0e-48e1b8f2a941",
       "label": "Отправить email-офферы",
       "description": "Отправка офферов пользователям по назначенным отелям",
       "input_mapping": {
