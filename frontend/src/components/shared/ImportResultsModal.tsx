@@ -24,7 +24,7 @@ interface ImportResultsModalProps {
   isOpen: boolean;
   onClose: () => void;
   results: {
-    success_actions: any[];
+    succeeded_actions: any[];
     failed_actions: any[];
   } | null;
 }
@@ -36,7 +36,7 @@ export const ImportResultsModal: React.FC<ImportResultsModalProps> = ({
 }) => {
   if (!results) return null;
 
-  const totalSuccess = results.success_actions.length;
+  const totalSuccess = results.succeeded_actions.length;
   const totalFailed = results.failed_actions.length;
 
   return (
@@ -87,7 +87,7 @@ export const ImportResultsModal: React.FC<ImportResultsModalProps> = ({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {results.success_actions.map((action, idx) => (
+                    {results.succeeded_actions.map((action, idx) => (
                       <TableRow key={idx} className="hover:bg-transparent border-border/50">
                         <TableCell>
                           <Badge variant="outline" className="font-bold border-green-500/30 text-green-500 bg-green-500/5">
