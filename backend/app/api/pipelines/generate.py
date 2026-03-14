@@ -26,9 +26,11 @@ async def generate_pipeline(
         )
     except Exception as exc:
         if "ollama" in str(exc).lower():
+            message_ru = "Не удалось обратиться к локальной модели Ollama. Проверьте OLLAMA_HOST/OLLAMA_MODEL и повторите запрос."
             result = {
                 "status": "cannot_build",
-                "message_ru": "Не удалось обратиться к локальной модели Ollama. Проверьте OLLAMA_HOST/OLLAMA_MODEL и повторите запрос.",
+                "message_ru": message_ru,
+                "chat_reply_ru": message_ru,
                 "pipeline_id": None,
                 "nodes": [],
                 "edges": [],

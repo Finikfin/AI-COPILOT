@@ -219,41 +219,54 @@ curl -X POST "http://localhost:8000/api/v1/pipelines/generate" \
 {
   "status": "ready",
   "message_ru": "Пайплайн собран. Можно запускать.",
+  "chat_reply_ru": "Пайплайн собран. Можно запускать. План шагов: get_users_recent -> get_hotels_top -> post_segments_hotel.",
   "pipeline_id": "7b17ac70-3f39-4e70-8f8a-4a2f1fd4ff7e",
   "nodes": [
     {
-      "id": "node_1",
-      "capability_id": "492b301c-1073-4ae5-aa24-b6ec447152f5",
-      "action_id": "e4b0bcb6-6a8c-4b0a-8e18-3f44b5f7d1c2",
-      "label": "Получить недавних пользователей",
-      "description": "Чтение списка пользователей для кампании",
-      "input_mapping": null,
-      "position": {
-        "x": 0.0,
-        "y": 0.0
-      }
+      "step": 1,
+      "name": "get_users_recent",
+      "description": "Отбирает недавних пользователей для travel campaign.",
+      "input_connected_from": [],
+      "output_connected_to": [3],
+      "input_data_type_from_previous": [],
+      "external_inputs": [],
+      "endpoints": [
+        {
+          "name": "get_users_recent",
+          "capability_id": "c4be1e66-2e04-4c6f-8d8f-6f39f1f46087",
+          "action_id": "e4b0bcb6-6a8c-4b0a-8e18-3f44b5f7d1c2",
+          "output_type": "users[]"
+        }
+      ]
     },
     {
-      "id": "node_2",
-      "capability_id": "b5f3eee3-5229-4d43-ad5f-cb7a9c864c82",
-      "action_id": "96f0bc8f-e294-46a9-9a0e-48e1b8f2a941",
-      "label": "Отправить email-офферы",
-      "description": "Отправка офферов пользователям по назначенным отелям",
-      "input_mapping": {
-        "users": "{{node_1.output.users}}"
-      },
-      "position": {
-        "x": 420.0,
-        "y": 0.0
-      }
+      "step": 2,
+      "name": "get_hotels_top",
+      "description": "Получает список топовых отелей для офферов.",
+      "input_connected_from": [],
+      "output_connected_to": [3],
+      "input_data_type_from_previous": [],
+      "external_inputs": [],
+      "endpoints": [
+        {
+          "name": "get_hotels_top",
+          "capability_id": "470ae37e-029e-4c67-a293-acb848675d0b",
+          "action_id": "96f0bc8f-e294-46a9-9a0e-48e1b8f2a941",
+          "output_type": "hotels[]"
+        }
+      ]
     }
   ],
   "edges": [
     {
-      "id": "edge_1",
-      "source": "node_1",
-      "target": "node_2",
-      "condition": null
+      "from_step": 1,
+      "to_step": 3,
+      "type": "users"
+    },
+    {
+      "from_step": 2,
+      "to_step": 3,
+      "type": "hotels"
     }
   ],
   "missing_requirements": [],

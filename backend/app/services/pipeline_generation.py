@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 import json
+import re
+from collections import defaultdict, deque
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Capability, Pipeline, PipelineStatus
-from app.schemas.pipeline_chat_sch import PipelineGraphEdge, PipelineGraphNode
+from app.models import Action, Capability, Pipeline, PipelineStatus
+from app.schemas.pipeline_chat_sch import (
+    PipelineGraphEdge,
+    PipelineGraphNode,
+    PipelineInputTypeFromPrevious,
+    PipelineStepEndpoint,
+)
 from app.services.capability_service import CapabilityService
 from app.services.dialog_memory import DialogMemoryService
 from app.utils.ollama_client import chat_json
@@ -27,10 +35,17 @@ class PipelineGenerationService:
     ) -> dict[str, Any]:
         capabilities = await self._load_capabilities(capability_ids)
         if not capabilities:
+            message_ru = "Сейчас у меня нет подходящих capability. Добавьте Swagger/OpenAPI или документы по API."
             summary = await self._safe_append_and_summarize(str(dialog_id), "user", message)
             return {
                 "status": "needs_input",
-                "message_ru": "Сейчас у меня нет подходящих capability. Добавьте Swagger/OpenAPI или документы по API.",
+                "message_ru": message_ru,
+                "chat_reply_ru": self._build_chat_reply(
+                    status="needs_input",
+                    message_ru=message_ru,
+                    nodes=[],
+                    missing_requirements=["swagger_or_openapi"],
+                ),
                 "pipeline_id": None,
                 "nodes": [],
                 "edges": [],
@@ -38,16 +53,15 @@ class PipelineGenerationService:
                 "context_summary": summary,
             }
 
+        action_by_id = await self._load_actions(capabilities)
         history, summary = await self._safe_get_context(str(dialog_id))
+
         llm_payload = None
         try:
             llm_payload = chat_json(
                 system_prompt=(
-                    "Ты строишь pipeline-граф по бизнес-задаче. "
-                    "Верни только JSON с полями: "
-                    "status, message_ru, nodes, edges, missing_requirements, pipeline_name, pipeline_description. "
-                    "status может быть только ready, needs_input, cannot_build. "
-                    "Все объяснения для пользователя должны быть на русском."
+                    "Ты проектируешь DAG workflow. "
+                    "Возвращай только JSON без markdown и без текста вне JSON."
                 ),
                 user_prompt=self._build_generation_prompt(
                     summary=summary,
@@ -59,9 +73,9 @@ class PipelineGenerationService:
         except Exception:
             llm_payload = None
 
-        response = self._normalize_llm_response(llm_payload, capabilities)
+        response = self._normalize_llm_response(llm_payload, capabilities, action_by_id)
         if response["status"] != "ready":
-            heuristic_response = self._build_heuristic_response(message, capabilities)
+            heuristic_response = self._build_heuristic_response(message, capabilities, action_by_id)
             if heuristic_response is not None:
                 response = heuristic_response
 
@@ -79,12 +93,19 @@ class PipelineGenerationService:
             response["pipeline_id"] = None
 
         updated_summary = await self._safe_append_and_summarize(str(dialog_id), "user", message)
-        assistant_summary_line = response["message_ru"]
-        updated_summary = await self._safe_append_and_summarize(str(dialog_id), "assistant", assistant_summary_line)
+        updated_summary = await self._safe_append_and_summarize(str(dialog_id), "assistant", response["message_ru"])
         response["context_summary"] = updated_summary or summary
+        response["chat_reply_ru"] = self._build_chat_reply(
+            status=response["status"],
+            message_ru=response["message_ru"],
+            nodes=response["nodes"],
+            missing_requirements=response["missing_requirements"],
+        )
+
         return {
             "status": response["status"],
             "message_ru": response["message_ru"],
+            "chat_reply_ru": response["chat_reply_ru"],
             "pipeline_id": response["pipeline_id"],
             "nodes": response["nodes"],
             "edges": response["edges"],
@@ -118,6 +139,14 @@ class PipelineGenerationService:
         capability_service = CapabilityService(self.session)
         return await capability_service.get_capabilities(capability_ids=capability_ids)
 
+    async def _load_actions(self, capabilities: list[Capability]) -> dict[str, Action]:
+        action_ids = [capability.action_id for capability in capabilities if capability.action_id is not None]
+        if not action_ids:
+            return {}
+        result = await self.session.execute(select(Action).where(Action.id.in_(action_ids)))
+        actions = list(result.scalars().all())
+        return {str(action.id): action for action in actions}
+
     def _build_generation_prompt(
         self,
         *,
@@ -131,117 +160,476 @@ class PipelineGenerationService:
                 "id": str(capability.id),
                 "name": capability.name,
                 "description": capability.description,
-                "input_schema": capability.input_schema,
-                "output_schema": capability.output_schema,
-                "data_format": capability.data_format,
             }
             for capability in capabilities
         ]
-        payload = {
+
+        data = {
+            "business_task": message,
             "dialog_summary": summary,
             "recent_history": history[-6:],
-            "user_message": message,
             "capabilities": capabilities_payload,
         }
-        return json.dumps(payload, ensure_ascii=False, indent=2)
+
+        instruction = (
+            "Дано:\n"
+            "- business_task — текст бизнес-задачи\n"
+            "- capabilities — список [{id, name, description}]\n\n"
+            "Задача:\n"
+            "Построить DAG workflow, который решает business_task, используя только подходящие capabilities.\n\n"
+            "Правила:\n"
+            "- выбирай только нужные capabilities\n"
+            "- определяй зависимости по смыслу бизнес-процесса\n"
+            "- не строй автоматически линейную цепочку\n"
+            "- если шагу нужны результаты нескольких предыдущих шагов, добавь несколько входящих связей\n"
+            "- финальный шаг должен напрямую решать business_task\n"
+            "- граф должен быть ацикличным\n"
+            "- если шагу нужен параметр, который не создаётся предыдущими шагами, добавь его в external_inputs\n"
+            "- type у связи — короткое смысловое имя данных (например users, hotels, segments, assignments, offers)\n\n"
+            "Верни только JSON:\n"
+            "{\n"
+            '  "nodes": [\n'
+            "    {\n"
+            '      "step": 1,\n'
+            '      "name": "",\n'
+            '      "description": "",\n'
+            '      "input_connected_from": [],\n'
+            '      "output_connected_to": [],\n'
+            '      "input_data_type_from_previous": [],\n'
+            '      "external_inputs": [],\n'
+            '      "endpoints": [""]\n'
+            "    }\n"
+            "  ],\n"
+            '  "edges": [\n'
+            "    {\n"
+            '      "from_step": 1,\n'
+            '      "to_step": 2,\n'
+            '      "type": ""\n'
+            "    }\n"
+            "  ]\n"
+            "}"
+        )
+        return f"{instruction}\n\nINPUT:\n{json.dumps(data, ensure_ascii=False, indent=2)}"
 
     def _normalize_llm_response(
         self,
         payload: dict[str, Any] | None,
         capabilities: list[Capability],
+        action_by_id: dict[str, Action],
     ) -> dict[str, Any]:
-        capability_by_id = {str(capability.id): capability for capability in capabilities}
         if not isinstance(payload, dict):
             return self._cannot_build_response(
                 "Я не смог собрать корректный граф. Уточните задачу или добавьте больше OpenAPI/Swagger."
             )
 
-        status = payload.get("status")
-        if status not in {"ready", "needs_input", "cannot_build"}:
-            status = "cannot_build"
-
-        nodes = self._normalize_nodes(payload.get("nodes"), capability_by_id)
-        edges = self._normalize_edges(payload.get("edges"), {node["id"] for node in nodes})
-        missing_requirements = self._normalize_string_list(payload.get("missing_requirements"))
+        raw_status = payload.get("status")
+        status = raw_status if raw_status in {"ready", "needs_input", "cannot_build"} else "ready"
         message_ru = payload.get("message_ru")
         if not isinstance(message_ru, str) or not message_ru.strip():
             message_ru = self._default_message(status)
 
-        if status == "ready" and (not nodes or not edges):
-            status = "cannot_build"
-            message_ru = "Я не смог собрать исполнимый граф. Уточните задачу или добавьте больше API-контекста."
+        if status != "ready" and not payload.get("nodes"):
+            return {
+                "status": status,
+                "message_ru": message_ru,
+                "nodes": [],
+                "edges": [],
+                "missing_requirements": self._normalize_string_list(payload.get("missing_requirements")),
+                "pipeline_name": payload.get("pipeline_name"),
+                "pipeline_description": payload.get("pipeline_description"),
+            }
 
-        if status != "ready":
-            nodes = []
-            edges = []
+        normalized = self._normalize_workflow(payload, capabilities, action_by_id)
+        if normalized is None:
+            return self._cannot_build_response(
+                "Я не смог собрать корректный граф. Уточните задачу или добавьте больше OpenAPI/Swagger."
+            )
+
+        nodes, edges = normalized
+        if not nodes or not edges:
+            return self._cannot_build_response(
+                "Я не смог собрать исполнимый граф. Уточните задачу или добавьте больше API-контекста."
+            )
 
         return {
-            "status": status,
-            "message_ru": message_ru,
+            "status": "ready",
+            "message_ru": payload.get("message_ru") or "Пайплайн успешно собран.",
             "nodes": nodes,
             "edges": edges,
-            "missing_requirements": missing_requirements,
+            "missing_requirements": self._normalize_string_list(payload.get("missing_requirements")),
             "pipeline_name": payload.get("pipeline_name"),
             "pipeline_description": payload.get("pipeline_description"),
         }
 
-    def _normalize_nodes(
+    def _normalize_workflow(
         self,
-        payload: Any,
-        capability_by_id: dict[str, Capability],
+        payload: dict[str, Any],
+        capabilities: list[Capability],
+        action_by_id: dict[str, Action],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]] | None:
+        nodes_payload = payload.get("nodes")
+        edges_payload = payload.get("edges")
+        if not isinstance(nodes_payload, list) or not isinstance(edges_payload, list):
+            return None
+
+        capability_by_id = {str(capability.id): capability for capability in capabilities}
+
+        parsed_nodes: dict[int, dict[str, Any]] = {}
+        for node_raw in nodes_payload:
+            if not isinstance(node_raw, dict):
+                continue
+            step = self._to_int(node_raw.get("step"))
+            if step is None or step < 1:
+                continue
+
+            endpoints = self._normalize_endpoints(
+                raw_endpoints=node_raw.get("endpoints"),
+                node_name=node_raw.get("name"),
+                capabilities=capabilities,
+                action_by_id=action_by_id,
+            )
+            if not endpoints:
+                continue
+
+            parsed_nodes[step] = {
+                "step": step,
+                "name": str(node_raw.get("name") or endpoints[0]["name"]),
+                "description": str(node_raw.get("description")) if node_raw.get("description") is not None else None,
+                "endpoints": endpoints,
+                "external_inputs": self._normalize_string_list(node_raw.get("external_inputs")),
+            }
+
+        if not parsed_nodes:
+            return None
+
+        parsed_edges: list[dict[str, Any]] = []
+        for edge_raw in edges_payload:
+            edge = self._normalize_edge(edge_raw, parsed_nodes)
+            if edge is not None:
+                parsed_edges.append(edge)
+
+        if not parsed_edges and len(parsed_nodes) > 1:
+            # Если модель не вернула edges, строим простой safe fallback по порядку шага.
+            ordered_steps = sorted(parsed_nodes)
+            for index in range(len(ordered_steps) - 1):
+                from_step = ordered_steps[index]
+                to_step = ordered_steps[index + 1]
+                edge_type = self._infer_edge_type_from_node(parsed_nodes[from_step])
+                parsed_edges.append(
+                    PipelineGraphEdge(from_step=from_step, to_step=to_step, type=edge_type).model_dump()
+                )
+
+        parsed_edges = self._dedupe_edges(parsed_edges)
+        if self._has_cycle(parsed_nodes.keys(), parsed_edges):
+            return None
+
+        incoming_by_step: dict[int, list[int]] = defaultdict(list)
+        outgoing_by_step: dict[int, list[int]] = defaultdict(list)
+        incoming_types_by_step: dict[int, list[PipelineInputTypeFromPrevious]] = defaultdict(list)
+
+        for edge in parsed_edges:
+            from_step = edge["from_step"]
+            to_step = edge["to_step"]
+            edge_type = edge["type"]
+            outgoing_by_step[from_step].append(to_step)
+            incoming_by_step[to_step].append(from_step)
+            incoming_types_by_step[to_step].append(
+                PipelineInputTypeFromPrevious(from_step=from_step, type=edge_type)
+            )
+
+        normalized_nodes: list[dict[str, Any]] = []
+        for step in sorted(parsed_nodes):
+            node = parsed_nodes[step]
+            endpoint_capability = capability_by_id.get(str(node["endpoints"][0]["capability_id"]))
+            incoming_types = [item.type for item in incoming_types_by_step.get(step, [])]
+            external_inputs = node["external_inputs"] or self._infer_external_inputs(endpoint_capability, incoming_types)
+
+            normalized_node = PipelineGraphNode(
+                step=step,
+                name=node["name"],
+                description=node["description"],
+                input_connected_from=sorted(set(incoming_by_step.get(step, []))),
+                output_connected_to=sorted(set(outgoing_by_step.get(step, []))),
+                input_data_type_from_previous=incoming_types_by_step.get(step, []),
+                external_inputs=external_inputs,
+                endpoints=node["endpoints"],
+            )
+            normalized_nodes.append(normalized_node.model_dump())
+
+        return normalized_nodes, parsed_edges
+
+    def _normalize_endpoints(
+        self,
+        *,
+        raw_endpoints: Any,
+        node_name: Any,
+        capabilities: list[Capability],
+        action_by_id: dict[str, Action],
     ) -> list[dict[str, Any]]:
-        if not isinstance(payload, list):
-            return []
-        nodes: list[dict[str, Any]] = []
-        for item in payload:
-            if not isinstance(item, dict):
+        if not isinstance(raw_endpoints, list):
+            raw_endpoints = []
+
+        endpoints: list[dict[str, Any]] = []
+        for endpoint_raw in raw_endpoints:
+            capability = self._resolve_capability_from_endpoint(endpoint_raw, node_name, capabilities)
+            if capability is None:
                 continue
-            capability_id = str(item.get("capability_id", ""))
-            capability = capability_by_id.get(capability_id)
-            node_id = item.get("id")
-            if capability is None or not isinstance(node_id, str) or not node_id:
-                continue
-            position = item.get("position")
-            normalized_position = None
-            if isinstance(position, dict):
-                x = position.get("x")
-                y = position.get("y")
-                if isinstance(x, (int, float)) and isinstance(y, (int, float)):
-                    normalized_position = {"x": float(x), "y": float(y)}
-            node = PipelineGraphNode(
-                id=node_id,
+            action = action_by_id.get(str(capability.action_id))
+
+            if isinstance(endpoint_raw, dict):
+                endpoint_name = str(endpoint_raw.get("name") or capability.name)
+                input_type = endpoint_raw.get("input_type", self._infer_input_type(capability))
+                output_type = endpoint_raw.get("output_type", self._infer_output_type(capability, action))
+            elif isinstance(endpoint_raw, str):
+                endpoint_name = endpoint_raw
+                input_type = self._infer_input_type(capability)
+                output_type = self._infer_output_type(capability, action)
+            else:
+                endpoint_name = capability.name
+                input_type = self._infer_input_type(capability)
+                output_type = self._infer_output_type(capability, action)
+
+            endpoint = PipelineStepEndpoint(
+                name=endpoint_name,
                 capability_id=capability.id,
                 action_id=capability.action_id,
-                label=str(item.get("label") or capability.name),
-                description=str(item.get("description")) if item.get("description") is not None else capability.description,
-                input_mapping=item.get("input_mapping") if isinstance(item.get("input_mapping"), dict) else None,
-                position=normalized_position,
+                input_type=input_type,
+                output_type=output_type,
             )
-            nodes.append(node.model_dump())
-        return nodes
+            endpoints.append(endpoint.model_dump())
 
-    def _normalize_edges(self, payload: Any, valid_node_ids: set[str]) -> list[dict[str, Any]]:
-        if not isinstance(payload, list):
+        if endpoints:
+            return endpoints
+
+        fallback_capability = self._find_capability_by_name(capabilities, str(node_name) if node_name is not None else "")
+        if fallback_capability is None:
             return []
-        edges: list[dict[str, Any]] = []
-        for item in payload:
-            if not isinstance(item, dict):
+        action = action_by_id.get(str(fallback_capability.action_id))
+        endpoint = PipelineStepEndpoint(
+            name=fallback_capability.name,
+            capability_id=fallback_capability.id,
+            action_id=fallback_capability.action_id,
+            input_type=self._infer_input_type(fallback_capability),
+            output_type=self._infer_output_type(fallback_capability, action),
+        )
+        return [endpoint.model_dump()]
+
+    def _resolve_capability_from_endpoint(
+        self,
+        endpoint_raw: Any,
+        node_name: Any,
+        capabilities: list[Capability],
+    ) -> Capability | None:
+        capability_by_id = {str(capability.id): capability for capability in capabilities}
+
+        if isinstance(endpoint_raw, dict):
+            capability_id_raw = endpoint_raw.get("capability_id")
+            if capability_id_raw is not None:
+                capability = capability_by_id.get(str(capability_id_raw))
+                if capability is not None:
+                    return capability
+
+            endpoint_name = endpoint_raw.get("name")
+            if isinstance(endpoint_name, str):
+                capability = self._find_capability_by_name(capabilities, endpoint_name)
+                if capability is not None:
+                    return capability
+
+        if isinstance(endpoint_raw, str):
+            capability = self._find_capability_by_name(capabilities, endpoint_raw)
+            if capability is not None:
+                return capability
+
+        if isinstance(node_name, str):
+            return self._find_capability_by_name(capabilities, node_name)
+        return None
+
+    def _find_capability_by_name(self, capabilities: list[Capability], name: str) -> Capability | None:
+        if not name:
+            return None
+        candidate = self._normalize_token(name)
+        for capability in capabilities:
+            cap_name = self._normalize_token(capability.name)
+            if candidate == cap_name or candidate in cap_name or cap_name in candidate:
+                return capability
+        return None
+
+    def _normalize_edge(self, edge_raw: Any, parsed_nodes: dict[int, dict[str, Any]]) -> dict[str, Any] | None:
+        if not isinstance(edge_raw, dict):
+            return None
+
+        from_step = self._to_int(edge_raw.get("from_step"))
+        to_step = self._to_int(edge_raw.get("to_step"))
+        if from_step is None or to_step is None:
+            return None
+        if from_step not in parsed_nodes or to_step not in parsed_nodes:
+            return None
+
+        edge_type_raw = edge_raw.get("type")
+        edge_type = str(edge_type_raw).strip() if edge_type_raw is not None else ""
+        if not edge_type:
+            edge_type = self._infer_edge_type_from_node(parsed_nodes[from_step])
+
+        edge = PipelineGraphEdge(from_step=from_step, to_step=to_step, type=edge_type)
+        return edge.model_dump()
+
+    def _dedupe_edges(self, edges: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        deduped: list[dict[str, Any]] = []
+        seen: set[tuple[int, int, str]] = set()
+        for edge in edges:
+            key = (edge["from_step"], edge["to_step"], edge["type"])
+            if key in seen:
                 continue
-            source = item.get("source")
-            target = item.get("target")
-            edge_id = item.get("id")
-            if not all(isinstance(value, str) and value for value in (source, target, edge_id)):
+            seen.add(key)
+            deduped.append(edge)
+        return deduped
+
+    def _has_cycle(self, steps: Any, edges: list[dict[str, Any]]) -> bool:
+        step_set = {int(step) for step in steps}
+        indegree: dict[int, int] = {step: 0 for step in step_set}
+        outgoing: dict[int, list[int]] = defaultdict(list)
+
+        for edge in edges:
+            from_step = edge["from_step"]
+            to_step = edge["to_step"]
+            if from_step not in indegree or to_step not in indegree:
                 continue
-            if source not in valid_node_ids or target not in valid_node_ids:
-                continue
-            edge = PipelineGraphEdge(
-                id=edge_id,
-                source=source,
-                target=target,
-                condition=str(item.get("condition")) if item.get("condition") is not None else None,
+            outgoing[from_step].append(to_step)
+            indegree[to_step] += 1
+
+        queue = deque(step for step, deg in indegree.items() if deg == 0)
+        visited = 0
+        while queue:
+            step = queue.popleft()
+            visited += 1
+            for nxt in outgoing.get(step, []):
+                indegree[nxt] -= 1
+                if indegree[nxt] == 0:
+                    queue.append(nxt)
+        return visited != len(step_set)
+
+    def _infer_edge_type_from_node(self, node: dict[str, Any]) -> str:
+        endpoints = node.get("endpoints")
+        if isinstance(endpoints, list) and endpoints:
+            endpoint = endpoints[0]
+            if isinstance(endpoint, dict):
+                output_type = endpoint.get("output_type")
+                return self._edge_type_from_output(output_type)
+        return "data"
+
+    def _edge_type_from_output(self, output_type: Any) -> str:
+        if isinstance(output_type, str):
+            normalized = output_type.strip().lower()
+            normalized = normalized.replace("[]", "")
+            normalized = re.sub(r"[^a-z0-9_]+", "", normalized)
+            return normalized or "data"
+        if isinstance(output_type, dict) and output_type:
+            first_key = next(iter(output_type.keys()))
+            normalized = self._normalize_token(str(first_key))
+            return normalized or "data"
+        return "data"
+
+    def _infer_input_type(self, capability: Capability) -> str | dict[str, Any] | None:
+        return self._schema_to_type(capability.input_schema, semantic_hint=None)
+
+    def _infer_output_type(self, capability: Capability, action: Action | None) -> str | dict[str, Any] | None:
+        semantic_hint = self._semantic_collection_hint(capability.name)
+        inferred = self._schema_to_type(capability.output_schema, semantic_hint=None)
+        if semantic_hint is not None and (
+            inferred is None
+            or inferred == "object"
+            or (isinstance(inferred, dict) and len(inferred) <= 1)
+        ):
+            return semantic_hint
+        if inferred is not None:
+            return inferred
+        if action is not None and action.operation_id:
+            return self._semantic_collection_hint(action.operation_id)
+        return None
+
+    def _semantic_collection_hint(self, text: str | None) -> str | None:
+        if not text:
+            return None
+        normalized = text.lower()
+        if "users" in normalized or "user" in normalized or "пользоват" in normalized:
+            return "users[]"
+        if "hotels" in normalized or "hotel" in normalized or "отел" in normalized:
+            return "hotels[]"
+        if "segments" in normalized or "segment" in normalized or "сегмент" in normalized:
+            return "segments[]"
+        if "assignments" in normalized or "assignment" in normalized or "распредел" in normalized:
+            return "assignments[]"
+        if "offers" in normalized or "offer" in normalized or "оффер" in normalized:
+            return "offers[]"
+        return None
+
+    def _schema_to_type(self, schema: Any, *, semantic_hint: str | None) -> str | dict[str, Any] | None:
+        if semantic_hint:
+            return semantic_hint
+        if not isinstance(schema, dict):
+            return None
+
+        schema_type = schema.get("type")
+        if schema_type == "array":
+            item_schema = schema.get("items")
+            item_type = self._schema_type_scalar("item", item_schema)
+            return f"{item_type}[]" if item_type else "array[]"
+
+        if schema_type == "object" or isinstance(schema.get("properties"), dict):
+            properties = schema.get("properties")
+            if not isinstance(properties, dict) or not properties:
+                return "object"
+            result: dict[str, Any] = {}
+            for key, value in properties.items():
+                result[str(key)] = self._schema_type_scalar(str(key), value) or "unknown"
+            return result
+
+        if isinstance(schema_type, str):
+            return schema_type
+        return None
+
+    def _schema_type_scalar(self, key: str, schema: Any) -> str | None:
+        if not isinstance(schema, dict):
+            return None
+        schema_type = schema.get("type")
+        if schema_type == "array":
+            item_schema = schema.get("items")
+            if isinstance(item_schema, dict):
+                item_type = item_schema.get("type")
+                if isinstance(item_type, str):
+                    if item_type == "object":
+                        return f"{key}[]"
+                    return f"{item_type}[]"
+            return f"{key}[]"
+        if isinstance(schema_type, str):
+            return schema_type
+        if isinstance(schema.get("properties"), dict):
+            return "object"
+        return None
+
+    def _infer_external_inputs(self, capability: Capability | None, incoming_types: list[str]) -> list[str]:
+        if capability is None or not isinstance(capability.input_schema, dict):
+            return []
+
+        required = capability.input_schema.get("required")
+        if not isinstance(required, list):
+            return []
+
+        incoming_norm = {self._normalize_token(item) for item in incoming_types}
+        external_inputs: list[str] = []
+        for field in required:
+            field_name = str(field)
+            normalized_field = self._normalize_token(field_name)
+            covered = any(
+                normalized_field == token
+                or normalized_field.startswith(token)
+                or token.startswith(normalized_field)
+                for token in incoming_norm
+                if token
             )
-            edges.append(edge.model_dump())
-        return edges
+            if not covered:
+                external_inputs.append(field_name)
+        return external_inputs
 
     async def _save_pipeline(
         self,
@@ -278,6 +666,19 @@ class PipelineGenerationService:
             return [str(item) for item in value if item is not None]
         return [str(value)]
 
+    def _to_int(self, value: Any) -> int | None:
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str) and value.strip().isdigit():
+            return int(value.strip())
+        return None
+
+    def _normalize_token(self, value: str) -> str:
+        lowered = value.lower().strip()
+        lowered = lowered.replace("[]", "")
+        lowered = re.sub(r"[^a-z0-9а-я_]+", "_", lowered)
+        return lowered.strip("_")
+
     def _default_message(self, status: str) -> str:
         if status == "needs_input":
             return "Мне не хватает данных для построения пайплайна. Добавьте Swagger/OpenAPI или уточните задачу."
@@ -285,10 +686,30 @@ class PipelineGenerationService:
             return "Пайплайн успешно собран."
         return "Я не могу реализовать этот сценарий с текущими данными."
 
+    def _build_chat_reply(
+        self,
+        *,
+        status: str,
+        message_ru: str,
+        nodes: list[dict[str, Any]],
+        missing_requirements: list[str],
+    ) -> str:
+        if status == "ready" and nodes:
+            ordered = sorted(nodes, key=lambda item: int(item.get("step", 0)))
+            names = [str(node.get("name")) for node in ordered if node.get("name")]
+            if names:
+                chain = " -> ".join(names[:6])
+                return f"{message_ru} План шагов: {chain}."
+            return message_ru
+        if status == "needs_input" and missing_requirements:
+            return f"{message_ru} Нужны уточнения: {', '.join(missing_requirements)}."
+        return message_ru
+
     def _build_heuristic_response(
         self,
         message: str,
         capabilities: list[Capability],
+        action_by_id: dict[str, Action],
     ) -> dict[str, Any] | None:
         lowered_message = message.lower()
         need_users = any(token in lowered_message for token in ("user", "users", "юзер", "пользоват", "клиент"))
@@ -321,7 +742,6 @@ class PipelineGenerationService:
             missing.append("email_sender")
         if need_users and need_hotels and "assignments" not in selected and "segments" not in selected:
             missing.append("user_hotel_matching")
-
         if missing:
             return {
                 "status": "needs_input",
@@ -344,11 +764,9 @@ class PipelineGenerationService:
             ordered_roles.append("assignments")
         if need_email and "emails" in selected:
             ordered_roles.append("emails")
-
         if len(ordered_roles) < 2:
             return None
 
-        # Удаляем дубли по capability_id, чтобы не создавать повторяющиеся узлы.
         unique_roles: list[str] = []
         seen_capability_ids: set[UUID] = set()
         for role in ordered_roles:
@@ -357,33 +775,72 @@ class PipelineGenerationService:
                 continue
             unique_roles.append(role)
             seen_capability_ids.add(capability.id)
-
         if len(unique_roles) < 2:
             return None
 
-        node_by_role: dict[str, dict[str, Any]] = {}
+        role_to_step = {role: index for index, role in enumerate(unique_roles, start=1)}
+
+        edges: list[dict[str, Any]] = []
+
+        def add_edge(from_role: str, to_role: str, edge_type: str) -> None:
+            from_step = role_to_step.get(from_role)
+            to_step = role_to_step.get(to_role)
+            if from_step is None or to_step is None:
+                return
+            edge = PipelineGraphEdge(from_step=from_step, to_step=to_step, type=edge_type)
+            edges.append(edge.model_dump())
+
+        add_edge("users", "segments", "users")
+        add_edge("users", "assignments", "users")
+        add_edge("hotels", "assignments", "hotels")
+        add_edge("segments", "assignments", "segments")
+        add_edge("assignments", "emails", "assignments")
+
+        if not edges:
+            for index in range(len(unique_roles) - 1):
+                from_role = unique_roles[index]
+                to_role = unique_roles[index + 1]
+                edge_type = self._edge_type_from_output(self._semantic_collection_hint(from_role) or from_role)
+                add_edge(from_role, to_role, edge_type)
+
+        incoming_by_step: dict[int, list[int]] = defaultdict(list)
+        outgoing_by_step: dict[int, list[int]] = defaultdict(list)
+        incoming_types_by_step: dict[int, list[PipelineInputTypeFromPrevious]] = defaultdict(list)
+        for edge in edges:
+            from_step = edge["from_step"]
+            to_step = edge["to_step"]
+            edge_type = edge["type"]
+            incoming_by_step[to_step].append(from_step)
+            outgoing_by_step[from_step].append(to_step)
+            incoming_types_by_step[to_step].append(PipelineInputTypeFromPrevious(from_step=from_step, type=edge_type))
+
         nodes: list[dict[str, Any]] = []
-        x_position = 0.0
-        for index, role in enumerate(unique_roles, start=1):
+        for role in unique_roles:
+            step = role_to_step[role]
             capability = selected[role]
-            node = PipelineGraphNode(
-                id=f"node_{index}",
+            action = action_by_id.get(str(capability.action_id))
+            endpoint = PipelineStepEndpoint(
+                name=capability.name,
                 capability_id=capability.id,
                 action_id=capability.action_id,
-                label=self._build_node_label(role, capability),
-                description=capability.description,
-                input_mapping=self._build_input_mapping(role, node_by_role),
-                position={"x": x_position, "y": 0.0},
+                input_type=self._infer_input_type(capability),
+                output_type=self._infer_output_type(capability, action),
             )
-            dumped = node.model_dump()
-            node_by_role[role] = dumped
-            nodes.append(dumped)
-            x_position += 320.0
 
-        edges: list[dict[str, Any]] = self._build_heuristic_edges(node_by_role, unique_roles)
-        if not edges:
-            return None
+            incoming_types = [item.type for item in incoming_types_by_step.get(step, [])]
+            node = PipelineGraphNode(
+                step=step,
+                name=self._build_node_name(role, capability),
+                description=capability.description,
+                input_connected_from=sorted(set(incoming_by_step.get(step, []))),
+                output_connected_to=sorted(set(outgoing_by_step.get(step, []))),
+                input_data_type_from_previous=incoming_types_by_step.get(step, []),
+                external_inputs=self._infer_external_inputs(capability, incoming_types),
+                endpoints=[endpoint],
+            )
+            nodes.append(node.model_dump())
 
+        edges = self._dedupe_edges(edges)
         return {
             "status": "ready",
             "message_ru": "Собрал граф по задаче: отбор пользователей, подбор отелей и отправка офферов на email.",
@@ -408,7 +865,6 @@ class PipelineGenerationService:
                     score += 2 if keyword in capability.name.lower() else 1
             if score > 0:
                 scored.append((score, capability))
-
         if not scored:
             return None
         scored.sort(key=lambda item: item[0], reverse=True)
@@ -424,79 +880,15 @@ class PipelineGenerationService:
         ]
         return " ".join(fragments).lower()
 
-    def _build_node_label(self, role: str, capability: Capability) -> str:
+    def _build_node_name(self, role: str, capability: Capability) -> str:
         labels = {
-            "users": "Отобрать пользователей",
-            "hotels": "Подобрать отели",
-            "segments": "Сегментировать пользователей",
-            "assignments": "Распределить пользователей по отелям",
-            "emails": "Отправить офферы на email",
+            "users": "get_users_recent",
+            "hotels": "get_hotels_top",
+            "segments": "post_segments_hotel",
+            "assignments": "post_assignments_hotels",
+            "emails": "post_emails_send_offers",
         }
         return labels.get(role, capability.name)
-
-    def _build_input_mapping(self, role: str, node_by_role: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
-        users_node = node_by_role.get("users")
-        hotels_node = node_by_role.get("hotels")
-        segments_node = node_by_role.get("segments")
-        assignments_node = node_by_role.get("assignments")
-
-        if role == "segments" and users_node:
-            return {"users": f"{{{{{users_node['id']}.output.users}}}}"}
-        if role == "assignments":
-            payload: dict[str, Any] = {}
-            if segments_node:
-                payload["segments"] = f"{{{{{segments_node['id']}.output.segments}}}}"
-            elif users_node:
-                payload["users"] = f"{{{{{users_node['id']}.output.users}}}}"
-            if hotels_node:
-                payload["hotels"] = f"{{{{{hotels_node['id']}.output.hotels}}}}"
-            return payload or None
-        if role == "emails":
-            payload = {}
-            if assignments_node:
-                payload["assignments"] = f"{{{{{assignments_node['id']}.output.assignments}}}}"
-            if users_node:
-                payload["users"] = f"{{{{{users_node['id']}.output.users}}}}"
-            return payload or None
-        return None
-
-    def _build_heuristic_edges(
-        self,
-        node_by_role: dict[str, dict[str, Any]],
-        unique_roles: list[str],
-    ) -> list[dict[str, Any]]:
-        edges: list[dict[str, Any]] = []
-        edge_index = 1
-
-        def add_edge(source_role: str, target_role: str) -> None:
-            nonlocal edge_index
-            source_node = node_by_role.get(source_role)
-            target_node = node_by_role.get(target_role)
-            if source_node is None or target_node is None:
-                return
-            edge = PipelineGraphEdge(
-                id=f"edge_{edge_index}",
-                source=source_node["id"],
-                target=target_node["id"],
-                condition=None,
-            )
-            edges.append(edge.model_dump())
-            edge_index += 1
-
-        add_edge("users", "segments")
-        add_edge("users", "assignments")
-        add_edge("hotels", "assignments")
-        add_edge("segments", "assignments")
-        add_edge("assignments", "emails")
-        add_edge("users", "emails")
-
-        if edges:
-            return edges
-
-        # Линейный fallback, если роли нестандартные.
-        for index in range(len(unique_roles) - 1):
-            add_edge(unique_roles[index], unique_roles[index + 1])
-        return edges
 
     def _cannot_build_response(self, message_ru: str) -> dict[str, Any]:
         return {

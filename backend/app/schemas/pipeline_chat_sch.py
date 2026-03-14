@@ -6,21 +6,34 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 
-class PipelineGraphNode(BaseModel):
-    id: str
+class PipelineInputTypeFromPrevious(BaseModel):
+    from_step: int
+    type: str
+
+
+class PipelineStepEndpoint(BaseModel):
+    name: str
     capability_id: UUID
     action_id: UUID
-    label: str
+    input_type: str | dict[str, Any] | None = None
+    output_type: str | dict[str, Any] | None = None
+
+
+class PipelineGraphNode(BaseModel):
+    step: int
+    name: str
     description: str | None = None
-    input_mapping: dict[str, Any] | None = None
-    position: dict[str, float] | None = None
+    input_connected_from: list[int] = Field(default_factory=list)
+    output_connected_to: list[int] = Field(default_factory=list)
+    input_data_type_from_previous: list[PipelineInputTypeFromPrevious] = Field(default_factory=list)
+    external_inputs: list[str] = Field(default_factory=list)
+    endpoints: list[PipelineStepEndpoint] = Field(default_factory=list)
 
 
 class PipelineGraphEdge(BaseModel):
-    id: str
-    source: str
-    target: str
-    condition: str | None = None
+    from_step: int
+    to_step: int
+    type: str
 
 
 class PipelineGenerateRequest(BaseModel):
@@ -33,6 +46,7 @@ class PipelineGenerateRequest(BaseModel):
 class PipelineGenerateResponse(BaseModel):
     status: Literal["ready", "needs_input", "cannot_build"]
     message_ru: str
+    chat_reply_ru: str
     pipeline_id: UUID | None = None
     nodes: list[PipelineGraphNode] = Field(default_factory=list)
     edges: list[PipelineGraphEdge] = Field(default_factory=list)
