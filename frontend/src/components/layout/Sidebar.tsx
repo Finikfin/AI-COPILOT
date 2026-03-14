@@ -1,9 +1,9 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { cn } from '@/lib/utils';
-import { 
-  Terminal, 
-  Zap, 
+import {
+  Terminal,
+  Zap,
   Workflow,
   ChevronLeft,
   Home
@@ -53,18 +53,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
         )}
       >
         <div className="flex flex-col h-full">
-          {/* Header */}
-          <div className="flex items-center justify-between p-4 border-b border-border">
-            {isOpen && <span className="font-medium text-foreground">Навигация</span>}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onClose}
-              className="lg:hidden"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-          </div>
 
           {/* Navigation */}
           <nav className="flex-1 p-2">

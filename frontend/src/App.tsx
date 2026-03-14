@@ -15,6 +15,7 @@ import { Layout } from "@/components/layout/Layout";
 import Actions from "./pages/Actions";
 import Home from "./pages/Home";
 import Capabilities from "./pages/Capabilities";
+import Pipelines from "./pages/Pipelines";
 import NotFound from "./pages/NotFound";
 
 /**
@@ -45,6 +46,9 @@ const AppRoutes = () => {
 
         {/* Capabilities - Business logic skills */}
         <Route path="capabilities" element={<Capabilities />} />
+
+        {/* Pipelines - Visual workflow editor */}
+        <Route path="pipelines" element={<Pipelines />} />
       </Route>
 
       {/* 404 page for unmatched routes */}

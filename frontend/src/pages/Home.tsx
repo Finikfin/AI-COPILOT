@@ -26,7 +26,9 @@ const Home: React.FC = () => {
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatMessage.trim()) return;
-    // Logic for chat can be added here
+    
+    // Navigate to pipelines page with the message state
+    navigate('/pipelines', { state: { initialMessage: chatMessage } });
     setChatMessage('');
   };
 
