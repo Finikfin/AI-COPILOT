@@ -2,12 +2,9 @@ import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { 
-  LayoutDashboard, 
-  GitBranch, 
-  BarChart3, 
-  Database, 
-  Settings, 
-  HelpCircle,
+  Terminal, 
+  Zap, 
+  Workflow,
   ChevronLeft
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -19,34 +16,19 @@ interface SidebarProps {
 
 const navigationItems = [
   {
-    name: 'Dashboard',
-    href: '/',
-    icon: LayoutDashboard
+    name: 'Actions',
+    href: '/actions',
+    icon: Terminal
   },
   {
-    name: 'Редактор графа',
-    href: '/editor',
-    icon: GitBranch
+    name: 'Capabilities',
+    href: '/capabilities',
+    icon: Zap
   },
   {
-    name: 'Метрики',
-    href: '/metrics',
-    icon: BarChart3
-  },
-  {
-    name: 'Источники данных',
-    href: '/datasources',
-    icon: Database
-  },
-  {
-    name: 'Настройки',
-    href: '/settings',
-    icon: Settings
-  },
-  {
-    name: 'Справка',
-    href: '/help',
-    icon: HelpCircle
+    name: 'Pipelines',
+    href: '/pipelines',
+    icon: Workflow
   }
 ];
 

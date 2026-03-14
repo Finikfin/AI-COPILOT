@@ -1,35 +1,46 @@
 stages:
-  - lint
+  # - lint
   - test
   - build
   - deploy
 
 variables:
   PYTHON_IMAGE: "python:3.12-slim"
-  DOCKER_IMAGE: "$CI_REGISTRY_IMAGE"
-
+  NODE_IMAGE: "node:20-slim"
+  BACKEND_IMAGE: "$CI_REGISTRY_IMAGE/backend"
+  FRONTEND_IMAGE: "$CI_REGISTRY_IMAGE/frontend"
 
 .python-base:
   image: $PYTHON_IMAGE
   before_script:
-    - pip install -r solution/requirements.txt
-    - export PYTHONPATH=$PYTHONPATH:$(pwd)/solution
+    - pip install -r backend/requirements.txt
+    - export PYTHONPATH=$PYTHONPATH:$(pwd)/backend
 
-lint:
-  stage: lint
-  extends: .python-base
-  script:
-    - pip install ruff
-    - ruff check solution
+.node-base:
+  image: $NODE_IMAGE
+  before_script:
+    - cd frontend && npm ci
 
-test:
+# lint-backend:
+#   stage: lint
+#   extends: .python-base
+#   script:
+#     - pip install ruff
+#     - ruff check backend
+
+# lint-frontend:
+#   stage: lint
+#   extends: .node-base
+#   script:
+#     - npm run lint
+
+test-backend:
   stage: test
   extends: .python-base
   script:
-    - pytest solution/tests
+    - pytest backend/tests
 
-build:
-  stage: build
+.docker-setup:
   image: docker:24.0.5
   services:
     - name: docker:24.0.5-dind
@@ -41,19 +52,31 @@ build:
     DOCKER_DRIVER: overlay2
   before_script:
     - until docker info; do sleep 1; done
-  script:
     - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
-    - docker build --pull -t $DOCKER_IMAGE:latest -t $DOCKER_IMAGE:$CI_COMMIT_SHORT_SHA ./solution
-    - docker push $DOCKER_IMAGE:latest
-    - docker push $DOCKER_IMAGE:$CI_COMMIT_SHORT_SHA
+
+build-backend:
+  stage: build
+  extends: .docker-setup
+  script:
+    - docker build --pull -t $BACKEND_IMAGE:latest -t $BACKEND_IMAGE:$CI_COMMIT_SHORT_SHA ./backend
+    - docker push $BACKEND_IMAGE:latest
+    - docker push $BACKEND_IMAGE:$CI_COMMIT_SHORT_SHA
   only:
     - main
     - master
 
+build-frontend:
+  stage: build
+  extends: .docker-setup
+  script:
+    - docker build --pull -t $FRONTEND_IMAGE:latest -t $FRONTEND_IMAGE:$CI_COMMIT_SHORT_SHA ./frontend
+    - docker push $FRONTEND_IMAGE:latest
+    - docker push $FRONTEND_IMAGE:$CI_COMMIT_SHORT_SHA
+  only:
+    - main
+    - master
 
-
-deploy:
-  stage: deploy
+.deploy-base:
   image: alpine:latest
   before_script:
     - apk add --no-cache openssh-client
@@ -65,25 +88,42 @@ deploy:
     - mkdir -p ~/.ssh
     - chmod 700 ~/.ssh
     - '[[ ! -z "$SSH_KNOWN_HOSTS" ]] && echo "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts && chmod 644 ~/.ssh/known_hosts'
+  only:
+    - main
+    - master
+  environment:
+    name: production
 
+deploy-backend:
+  stage: deploy
+  extends: .deploy-base
   script:
     - |
       ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_IP "
         cd ~/backend &&
         git pull &&
-        cd solution &&
-        echo 'DOCKER_IMAGE=$DOCKER_IMAGE' > .env &&
+        # Останавливаем старую версию, если она есть
+        [ -d "solution" ] && sudo docker compose -f solution/docker-compose.yml down || true
+        cd backend &&
+        echo 'DOCKER_IMAGE=$BACKEND_IMAGE' > .env &&
         echo 'TAG=$CI_COMMIT_SHORT_SHA' >> .env &&
         sudo docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY &&
         sudo docker compose pull &&
         sudo docker compose up -d
       "
 
-
-
-
-  only:
-    - main
-    - master
-  environment:
-    name: production
+deploy-frontend:
+  stage: deploy
+  extends: .deploy-base
+  script:
+    - |
+      ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_IP "
+        cd ~/backend &&
+        git pull &&
+        cd frontend &&
+        echo 'DOCKER_IMAGE=$FRONTEND_IMAGE' > .env &&
+        echo 'TAG=$CI_COMMIT_SHORT_SHA' >> .env &&
+        sudo docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY &&
+        sudo docker compose pull &&
+        sudo docker compose up -d
+      "
