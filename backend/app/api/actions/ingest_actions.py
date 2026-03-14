@@ -4,14 +4,11 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database.session import get_session
-<<<<<<< HEAD
 from app.models import Action, ActionIngestStatus
 from app.schemas.action_sch import ActionIngestResponse
 from app.services.openapi_ingestion import extract_actions_with_failures_from_document, load_openapi_document
-=======
 from app.schemas.capability_sch import ActionIngestWithCapabilitiesResponse
 from app.services.capability_ingestion import ingest_openapi_to_capabilities
->>>>>>> ml
 
 
 router = APIRouter(tags=["Actions"])
@@ -23,8 +20,7 @@ async def ingest_actions(
     session: AsyncSession = Depends(get_session),
 ):
     try:
-<<<<<<< HEAD
-        document = load_openapi_document(payload)
+       s document = load_openapi_document(payload)
         ingestion_result = extract_actions_with_failures_from_document(document, source_filename=file.filename)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -48,14 +44,4 @@ async def ingest_actions(
         failed_count=len(failed_actions),
         succeeded_actions=succeeded_actions,
         failed_actions=failed_actions,
-=======
-        actions, capabilities = await ingest_openapi_to_capabilities(file, session)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-    return ActionIngestWithCapabilitiesResponse(
-        created_actions_count=len(actions),
-        created_capabilities_count=len(capabilities),
-        capabilities=capabilities,
->>>>>>> ml
     )

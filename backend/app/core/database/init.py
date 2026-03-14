@@ -26,18 +26,7 @@ async def init_db():
             text("CREATE INDEX IF NOT EXISTS ix_actions_is_deleted ON actions (is_deleted)")
         )
         await conn.execute(
-<<<<<<< HEAD
             text("CREATE INDEX IF NOT EXISTS ix_actions_ingest_status ON actions (ingest_status)")
-=======
-            text(
-                "CREATE INDEX IF NOT EXISTS ix_capabilities_action_id ON capabilities (action_id)"
-            )
-        )
-        await conn.execute(
-            text(
-                "CREATE INDEX IF NOT EXISTS ix_capabilities_name ON capabilities (name)"
-            )
->>>>>>> ml
         )
 
     async with SessionLocal() as session:
