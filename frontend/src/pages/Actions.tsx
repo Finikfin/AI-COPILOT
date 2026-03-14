@@ -26,7 +26,10 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { SwaggerImportModal } from '@/components/shared/SwaggerImportModal';
+import { ImportResultsModal } from '@/components/shared/ImportResultsModal';
 import { toast } from 'sonner';
+import { Action } from '@/types/action';
+import { useActionsContext } from '@/contexts/ActionContext';
 
 // Mock data for Actions
 const MOCK_ACTIONS = [
@@ -40,14 +43,17 @@ const MOCK_ACTIONS = [
 ];
 
 const Actions: React.FC = () => {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [actions, setActions] = useState([]);
+  const {
+    actions,
+    searchTerm,
+    setSearchTerm,
+    filteredActions,
+    addActions
+  } = useActionsContext();
+  
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
-
-  const filteredActions = actions.filter(action =>
-    action.path.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    action.tag.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const [isResultsModalOpen, setIsResultsModalOpen] = useState(false);
+  const [importResults, setImportResults] = useState<{ success_actions: Action[], failed_actions: any[] } | null>(null);
 
   const getMethodColor = (method: string) => {
     switch (method) {
@@ -71,16 +77,11 @@ const Actions: React.FC = () => {
         </div>
         <div className="flex items-center gap-3">
           <Button
-            variant="outline"
-            className="gap-2 border-border hover:bg-accent"
+            className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90"
             onClick={() => setIsImportModalOpen(true)}
           >
             <FileJson className="h-4 w-4" />
             Import Swagger
-          </Button>
-          <Button className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90">
-            <Plus className="h-4 w-4" />
-            New Action
           </Button>
         </div>
       </div>
@@ -103,7 +104,7 @@ const Actions: React.FC = () => {
         <div className="overflow-auto flex-1">
           <Table>
             <TableHeader className="bg-muted/50 sticky top-0 z-10">
-              <TableRow>
+              <TableRow className="hover:bg-transparent border-none">
                 <TableHead className="w-[100px] text-foreground">Method</TableHead>
                 <TableHead className="text-foreground">Endpoint Path</TableHead>
                 <TableHead className="text-foreground">Category</TableHead>
@@ -114,9 +115,9 @@ const Actions: React.FC = () => {
             <TableBody>
               {filteredActions.length > 0 ? (
                 filteredActions.map((action) => (
-                  <TableRow key={action.id} className="hover:bg-accent/50 group border-border">
+                  <TableRow key={action.id} className="group border-border">
                     <TableCell>
-                      <Badge className={`${getMethodColor(action.method)} variant-outline font-bold`}>
+                      <Badge variant="outline" className={`${getMethodColor(action.method)} font-bold`}>
                         {action.method}
                       </Badge>
                     </TableCell>
@@ -125,11 +126,11 @@ const Actions: React.FC = () => {
                     </TableCell>
                     <TableCell>
                       <span className="text-xs px-2 py-1 rounded-full bg-secondary text-secondary-foreground border border-border">
-                        {action.tag}
+                        {action.tags?.[0] || action.source_filename?.split('.')[0] || 'General'}
                       </span>
                     </TableCell>
                     <TableCell className="hidden md:table-cell text-muted-foreground text-sm max-w-xs truncate">
-                      {action.description}
+                      {action.summary || action.description}
                     </TableCell>
                     <TableCell>
                       <DropdownMenu>
@@ -181,7 +182,7 @@ const Actions: React.FC = () => {
 
         {/* Pagination Placeholder */}
         <div className="p-4 border-t border-border bg-muted/30 flex items-center justify-between text-xs text-muted-foreground">
-          <span>Показано {filteredActions.length} из {MOCK_ACTIONS.length} действий</span>
+          <span>Показано {filteredActions.length} из {actions.length} действий</span>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" className="h-7 text-xs border-border" disabled>Back</Button>
             <Button variant="outline" size="sm" className="h-7 text-xs border-border" disabled>Next</Button>
@@ -192,9 +193,26 @@ const Actions: React.FC = () => {
         isOpen={isImportModalOpen}
         onClose={() => setIsImportModalOpen(false)}
         onImport={(data) => {
-          console.log('Imported data:', data);
-          // Here logic to update actions state
+          if (data && (data.success_actions || data.actions)) {
+            const successList = data.success_actions || data.actions || [];
+            const failedList = data.failed_actions || [];
+            
+            // Update main table with successful actions
+            addActions(successList);
+            
+            // Prepare and open results modal
+            setImportResults({
+              success_actions: successList,
+              failed_actions: failedList
+            });
+            setIsResultsModalOpen(true);
+          }
         }}
+      />
+      <ImportResultsModal
+        isOpen={isResultsModalOpen}
+        onClose={() => setIsResultsModalOpen(false)}
+        results={importResults}
       />
     </div>
   );

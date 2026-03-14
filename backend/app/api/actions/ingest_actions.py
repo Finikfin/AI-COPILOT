@@ -7,17 +7,18 @@ from app.core.database.session import get_session
 from app.models import Action, ActionIngestStatus
 from app.schemas.action_sch import ActionIngestResponse
 from app.services.openapi_ingestion import extract_actions_with_failures_from_document, load_openapi_document
+from app.schemas.capability_sch import ActionIngestWithCapabilitiesResponse
+from app.services.capability_ingestion import ingest_openapi_to_capabilities
 
 
 router = APIRouter(tags=["Actions"])
 
 
-@router.post("/ingest", response_model=ActionIngestResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/ingest", response_model=ActionIngestWithCapabilitiesResponse, status_code=status.HTTP_201_CREATED)
 async def ingest_actions(
     file: UploadFile = File(...),
     session: AsyncSession = Depends(get_session),
 ):
-    payload = await file.read()
     try:
         document = load_openapi_document(payload)
         ingestion_result = extract_actions_with_failures_from_document(document, source_filename=file.filename)

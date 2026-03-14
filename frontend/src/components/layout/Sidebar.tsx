@@ -5,7 +5,8 @@ import {
   Terminal, 
   Zap, 
   Workflow,
-  ChevronLeft
+  ChevronLeft,
+  Home
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -15,6 +16,11 @@ interface SidebarProps {
 }
 
 const navigationItems = [
+  {
+    name: 'Home',
+    href: '/',
+    icon: Home
+  },
   {
     name: 'Actions',
     href: '/actions',

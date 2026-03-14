@@ -21,7 +21,6 @@ import React, { useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import { Header } from './Header';
 import { Sidebar } from './Sidebar';
-import { ChatButton } from '@/pages/ChatButton.tsx';
 
 /**
  * Layout component
@@ -66,9 +65,6 @@ export const Layout: React.FC = () => {
           </div>
         </main>
       </div>
-
-      {/* Floating chat support button */}
-      <ChatButton />
     </div>
   );
 };
