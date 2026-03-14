@@ -8,6 +8,26 @@ from app.services.openapi_ingestion import extract_actions_from_document, load_o
 from app.utils.ollama_client import build_capability_from_action
 
 
+def build_capabilities_from_actions(actions: list[Action]) -> list[Capability]:
+    capabilities: list[Capability] = []
+
+    for action in actions:
+        capability_payload = build_capability_from_action(action)
+        capabilities.append(
+            Capability(
+                action_id=action.id,
+                name=capability_payload["name"],
+                description=capability_payload.get("description"),
+                input_schema=capability_payload.get("input_schema"),
+                output_schema=capability_payload.get("output_schema"),
+                data_format=capability_payload.get("data_format"),
+                llm_payload=capability_payload.get("llm_payload"),
+            )
+        )
+
+    return capabilities
+
+
 async def ingest_openapi_to_capabilities(
     file: UploadFile,
     session: AsyncSession,
@@ -23,24 +43,12 @@ async def ingest_openapi_to_capabilities(
     session.add_all(actions)
     await session.flush()
 
-    capabilities: list[Capability] = []
-    for action in actions:
-        capability_payload = build_capability_from_action(action)
-        capabilities.append(
-            Capability(
-                action_id=action.id,
-                name=capability_payload["name"],
-                description=capability_payload.get("description"),
-                input_schema=capability_payload.get("input_schema"),
-                output_schema=capability_payload.get("output_schema"),
-                data_format=capability_payload.get("data_format"),
-                llm_payload=capability_payload.get("llm_payload"),
-            )
-        )
-
+    capabilities = build_capabilities_from_actions(actions)
     session.add_all(capabilities)
     await session.commit()
 
+    for action in actions:
+        await session.refresh(action)
     for capability in capabilities:
         await session.refresh(capability)
 

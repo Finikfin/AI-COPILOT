@@ -14,7 +14,6 @@ class Capability(TimestampMixin, Base):
     __tablename__ = "capabilities"
     __table_args__ = (
         Index("ix_capabilities_action_id", "action_id"),
-        Index("ix_capabilities_name", "name"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(

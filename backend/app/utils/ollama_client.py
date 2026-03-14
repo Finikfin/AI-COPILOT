@@ -22,7 +22,7 @@ def build_capability_from_action(action: Any) -> dict[str, Any]:
 
 
 def _call_ollama(action: Any) -> dict[str, Any] | None:
-    host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+    host = os.getenv("OLLAMA_HOST", "http://158.160.90.60:8067")
     model = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
     headers = _load_headers()
     prompt = _build_prompt(action)

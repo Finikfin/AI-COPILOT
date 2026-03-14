@@ -6,6 +6,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
+from app.schemas.action_sch import ActionDetailResponse
+
 
 class CapabilityDataFormat(BaseModel):
     parameter_locations: list[str] = []
@@ -30,6 +32,9 @@ class CapabilityResponse(BaseModel):
 
 
 class ActionIngestWithCapabilitiesResponse(BaseModel):
-    created_actions_count: int
+    succeeded_count: int
+    failed_count: int
     created_capabilities_count: int
+    succeeded_actions: list[ActionDetailResponse]
+    failed_actions: list[ActionDetailResponse]
     capabilities: list[CapabilityResponse]
