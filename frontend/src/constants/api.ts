@@ -8,5 +8,8 @@ export const ENDPOINTS = {
   AUTH: {
     LOGIN: `${API_BASE_URL}/auth/login`,
     REGISTER: `${API_BASE_URL}/auth/register`,
+  },
+  PIPELINES: {
+    GENERATE: `${API_BASE_URL}/pipelines/generate`,
   }
 };

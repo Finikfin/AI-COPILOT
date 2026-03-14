@@ -12,6 +12,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { generatePipeline } from '@/api/chat';
 
 const Home: React.FC = () => {
   const { actions, addActions } = useActionsContext();
@@ -23,9 +24,12 @@ const Home: React.FC = () => {
 
   const isChatDisabled = actions.length === 0;
 
-  const handleSendMessage = (e: React.FormEvent) => {
+  const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatMessage.trim()) return;
+    
+    // Send message to generate pipeline endpoint
+    await generatePipeline(chatMessage);
     
     // Navigate to pipelines page with the message state
     navigate('/pipelines', { state: { initialMessage: chatMessage } });

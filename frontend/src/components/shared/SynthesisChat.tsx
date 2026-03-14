@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import { generatePipeline } from '@/api/chat';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -55,6 +56,9 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({ onSynthesize, clas
     const userMessage = valueToSend;
     setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
     setInputValue('');
+
+    // Send message to generate pipeline endpoint
+    generatePipeline(userMessage);
 
     // Simulate AI response
     setTimeout(() => {
