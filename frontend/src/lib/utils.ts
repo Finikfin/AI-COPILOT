@@ -108,3 +108,22 @@ export function ensureNodeListHasHealth(nodes) {
         : Math.floor(Math.random() * 100),
   }));
 }
+/**
+ * Generates a unique UUID
+ * 
+ * Uses the Web Crypto API if available, otherwise falls back to a 
+ * Math.random() based implementation for non-secure contexts.
+ * 
+ * @returns string - Unique UUID
+ */
+export function generateUUID() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  // Fallback for non-secure contexts
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}

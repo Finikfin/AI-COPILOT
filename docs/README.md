@@ -197,6 +197,83 @@ GET|`/api/v1/pipelines`|Список всех сохраненных или сг
 GET|`/api/v1/pipelines/{id}`|Загрузка конкретного графа на канвас.
 PUT|`/api/v1/pipelines/{id}`|Сохранение ручных правок: если PM подвигал ноды или изменил параметры.
 DELETE|`/api/v1/pipelines/{id}`|Удаление сценария.
+
+#### Вызов чата: `POST /api/v1/pipelines/generate`
+
+Используйте один и тот же `dialog_id` для одной цепочки сообщений, чтобы сохранялся контекст.
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/pipelines/generate" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "dialog_id": "11111111-1111-1111-1111-111111111111",
+    "message": "Нужно взять 30 последних пользователей, распределить по 5 отелям и отправить email-офферы",
+    "user_id": null,
+    "capability_ids": null
+  }'
+```
+
+#### Пример ответа чата
+
+```json
+{
+  "status": "ready",
+  "message_ru": "Пайплайн собран. Можно запускать.",
+  "pipeline_id": "7b17ac70-3f39-4e70-8f8a-4a2f1fd4ff7e",
+  "nodes": [
+    {
+      "id": "node_1",
+      "capability_id": "492b301c-1073-4ae5-aa24-b6ec447152f5",
+      "label": "Получить недавних пользователей",
+      "description": "Чтение списка пользователей для кампании",
+      "input_mapping": null,
+      "position": {
+        "x": 0.0,
+        "y": 0.0
+      }
+    },
+    {
+      "id": "node_2",
+      "capability_id": "b5f3eee3-5229-4d43-ad5f-cb7a9c864c82",
+      "label": "Отправить email-офферы",
+      "description": "Отправка офферов пользователям по назначенным отелям",
+      "input_mapping": {
+        "users": "{{node_1.output.users}}"
+      },
+      "position": {
+        "x": 420.0,
+        "y": 0.0
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge_1",
+      "source": "node_1",
+      "target": "node_2",
+      "condition": null
+    }
+  ],
+  "missing_requirements": [],
+  "context_summary": "Пользователь хочет собрать travel-рассылку из доступных capability."
+}
+```
+
+`status` может быть:
+- `ready` — граф построен, `pipeline_id/nodes/edges` заполнены.
+- `needs_input` — нужно уточнение или добавить Swagger/OpenAPI.
+- `cannot_build` — с текущими данными сценарий не собирается.
+
+#### Сброс диалога: `POST /api/v1/pipelines/dialog/reset`
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/pipelines/dialog/reset" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "dialog_id": "11111111-1111-1111-1111-111111111111"
+  }'
+```
+
 ### Execution
 Запуск пайплайна.
 Метод|Путь|Описание
