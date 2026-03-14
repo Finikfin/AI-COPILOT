@@ -40,17 +40,17 @@ const AppRoutes = () => {
       <Route path="/" element={<Layout />}>
         {/* Home page as the initial screen */}
         <Route index element={<Home />} />
-        
+
         {/* Actions - Technical API methods */}
         <Route path="actions" element={<Actions />} />
-        
+
         {/* Capabilities - Business logic skills */}
         <Route path="capabilities" element={<Capabilities />} />
-        
-        {/* Pipelines - Disabled for now */}
-        {/* <Route path="pipelines" element={<Pipelines />} /> */}
+
+        {/* Pipelines - Visual workflow editor */}
+        <Route path="pipelines" element={<Pipelines />} />
       </Route>
-      
+
       {/* 404 page for unmatched routes */}
       <Route path="*" element={<NotFound />} />
     </Routes>
@@ -75,27 +75,27 @@ const App = () => (
       <TooltipProvider>
         <ActionProvider>
           {/* Toast notification system configuration */}
-        <Toaster
-          position="top-right"
-          theme="light"
-          duration={3500}
-          closeButton
-          toastOptions={{
-            style: {
-              background: '#fff',
-              color: '#222',
-              borderRadius: '10px',
-              boxShadow: '0 4px 24px 0 rgba(0,0,0,0.10)',
-              fontSize: '1rem',
-              fontWeight: 500,
-              border: '1px solid #e5e7eb',
-            },
-          }}
-        />
-        {/* Router with basename for deployment path */}
-        <BrowserRouter basename="/">
-          <AppRoutes />
-        </BrowserRouter>
+          <Toaster
+            position="top-right"
+            theme="light"
+            duration={3500}
+            closeButton
+            toastOptions={{
+              style: {
+                background: '#fff',
+                color: '#222',
+                borderRadius: '10px',
+                boxShadow: '0 4px 24px 0 rgba(0,0,0,0.10)',
+                fontSize: '1rem',
+                fontWeight: 500,
+                border: '1px solid #e5e7eb',
+              },
+            }}
+          />
+          {/* Router with basename for deployment path */}
+          <BrowserRouter basename="/">
+            <AppRoutes />
+          </BrowserRouter>
         </ActionProvider>
       </TooltipProvider>
     </AuthProvider>

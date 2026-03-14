@@ -7,7 +7,14 @@ from typing import Any
 
 
 def build_capability_from_action(action: Any) -> dict[str, Any]:
-    llm_result = _call_ollama(action)
+    llm_result = _call_ollama_json(
+        system_prompt=(
+            "You convert one API action into one capability. "
+            "Return only valid JSON with keys: "
+            "name, description, input_schema, output_schema, data_format."
+        ),
+        user_prompt=_build_prompt(action),
+    )
     if llm_result is not None:
         normalized = _normalize_capability_payload(llm_result, action)
         normalized["llm_payload"] = llm_result
@@ -21,11 +28,32 @@ def build_capability_from_action(action: Any) -> dict[str, Any]:
     return fallback
 
 
-def _call_ollama(action: Any) -> dict[str, Any] | None:
-    host = os.getenv("OLLAMA_HOST", "http://158.160.90.60:8067")
+def chat_json(system_prompt: str, user_prompt: str) -> dict[str, Any] | None:
+    return _call_ollama_json(system_prompt=system_prompt, user_prompt=user_prompt)
+
+
+async def summarize_dialog_text(messages: list[dict[str, Any]]) -> str | None:
+    prompt = (
+        "Кратко сожми историю диалога на русском. "
+        "Сохрани цель пользователя, ограничения, недостающие данные и важные решения. "
+        "Ответь только текстом без markdown.\n\n"
+        f"История:\n{json.dumps(messages, ensure_ascii=False)}"
+    )
+    payload = _call_ollama_json(
+        system_prompt="Ты помощник, который сжимает диалоговый контекст для дальнейшего планирования.",
+        user_prompt=prompt,
+    )
+    if isinstance(payload, dict):
+        summary = payload.get("summary")
+        if isinstance(summary, str) and summary.strip():
+            return summary.strip()
+    return None
+
+
+def _call_ollama_json(system_prompt: str, user_prompt: str) -> dict[str, Any] | None:
+    host = os.getenv("OLLAMA_HOST", "http://158.160.90.60:11434у ")
     model = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
     headers = _load_headers()
-    prompt = _build_prompt(action)
 
     try:
         from ollama import Client
@@ -39,15 +67,11 @@ def _call_ollama(action: Any) -> dict[str, Any] | None:
             messages=[
                 {
                     "role": "system",
-                    "content": (
-                        "You convert one API action into one capability. "
-                        "Return only valid JSON with keys: "
-                        "name, description, input_schema, output_schema, data_format."
-                    ),
+                    "content": system_prompt,
                 },
                 {
                     "role": "user",
-                    "content": prompt,
+                    "content": user_prompt,
                 },
             ],
             options={"temperature": 0},

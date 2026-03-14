@@ -5,9 +5,7 @@ import {
   User, 
   Bot, 
   RotateCcw, 
-  CheckCircle2,
-  Workflow,
-  X
+  CheckCircle2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -22,11 +20,12 @@ interface Message {
 }
 
 interface SynthesisChatProps {
-  onSynthesize: (prompt: string) => void;
+  onSynthesize?: (prompt: string) => void;
   className?: string;
+  initialMessage?: string;
 }
 
-export const SynthesisChat: React.FC<SynthesisChatProps> = ({ onSynthesize, className }) => {
+export const SynthesisChat: React.FC<SynthesisChatProps> = ({ onSynthesize, className, initialMessage }) => {
   const [messages, setMessages] = useState<Message[]>([
     { 
       role: 'assistant', 
@@ -42,10 +41,18 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({ onSynthesize, clas
     }
   }, [messages]);
 
-  const handleSend = () => {
-    if (!inputValue.trim()) return;
+  // Handle initial message from props
+  useEffect(() => {
+    if (initialMessage && messages.length === 1) {
+      handleSend(initialMessage);
+    }
+  }, [initialMessage]);
 
-    const userMessage = inputValue;
+  const handleSend = (overrideValue?: string) => {
+    const valueToSend = overrideValue || inputValue;
+    if (!valueToSend.trim()) return;
+
+    const userMessage = valueToSend;
     setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
     setInputValue('');
 
@@ -63,11 +70,11 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({ onSynthesize, clas
           const lastIndex = newMessages.length - 1;
           newMessages[lastIndex] = { 
             role: 'assistant', 
-            content: 'Я подготовил Pipeline для вашей задачи. Пожалуйста, посмотрите на канвас. Все готово к запуску!' 
+            content: 'Я подготовил Pipeline для вашей задачи. Посмотрите на схему по центру. Все готово к запуску!' 
           };
           return newMessages;
         });
-        onSynthesize(userMessage);
+        if (onSynthesize) onSynthesize(userMessage);
       }, 1500);
     }, 500);
   };
@@ -80,7 +87,7 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({ onSynthesize, clas
           <h3 className="font-semibold text-sm text-foreground">Synthesis Chat</h3>
         </div>
         <Badge variant="outline" className="text-[10px] bg-primary/10 text-primary border-primary/20">
-          PROMPT READY
+          AI ASSISTANT
         </Badge>
       </div>
 
@@ -139,14 +146,11 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({ onSynthesize, clas
           <Button 
             size="sm" 
             className="absolute right-1 top-1 h-9 w-9 p-0 bg-primary hover:bg-primary/90"
-            onClick={handleSend}
+            onClick={() => handleSend()}
           >
             <Send className="h-4 w-4" />
           </Button>
         </div>
-        <p className="text-[10px] text-muted-foreground text-center">
-          AI подберет Skills и соединит их в рабочий процесс.
-        </p>
       </div>
     </div>
   );

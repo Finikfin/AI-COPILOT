@@ -82,11 +82,13 @@ All colors MUST be HSL.
 }
 
 .bg-grid-pattern {
-  background-image: linear-gradient(
-      to right,
-      rgba(34, 197, 94, 0.15) 1px,
-      transparent 1px
-    ),
-    linear-gradient(to bottom, rgba(34, 197, 94, 0.15) 1px, transparent 1px);
-  background-size: 30px 30px;
+  background-image: 
+    linear-gradient(to right, hsl(var(--primary) / 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, hsl(var(--primary) / 0.05) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.bg-dot-pattern {
+  background-image: radial-gradient(hsl(var(--primary) / 0.2) 1px, transparent 1px);
+  background-size: 20px 20px;
 }

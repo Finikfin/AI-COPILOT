@@ -26,7 +26,9 @@ const Home: React.FC = () => {
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatMessage.trim()) return;
-    // Logic for chat can be added here
+    
+    // Navigate to pipelines page with the message state
+    navigate('/pipelines', { state: { initialMessage: chatMessage } });
     setChatMessage('');
   };
 
@@ -150,10 +152,6 @@ const Home: React.FC = () => {
         isOpen={isResultsModalOpen}
         onClose={() => {
           setIsResultsModalOpen(false);
-          // Redirect to actions page after closing results if there were successes
-          if (importResults && importResults.succeeded_actions.length > 0) {
-            navigate('/actions');
-          }
         }}
         results={importResults}
       />

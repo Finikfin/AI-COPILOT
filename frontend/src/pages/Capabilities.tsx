@@ -67,9 +67,9 @@ const MOCK_BIO_CAPABILITIES = [
 
 const Capabilities: React.FC = () => {
   return (
-    <div className="flex h-full flex-col px-6 py-8">
+    <div className="flex h-full flex-col px-4 sm:px-6 py-6 sm:py-8">
       {/* Header Section */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between mb-8 gap-6">
         <div>
           <h1 className="text-2xl font-semibold text-foreground flex items-center gap-2">
             <Zap className="h-6 w-6 text-primary fill-primary/20" />
@@ -79,34 +79,34 @@ const Capabilities: React.FC = () => {
             Бизнес-навыки, созданные путем объединения нескольких API Actions. Обучены для понимания вашим ИИ.
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <Button variant="outline" className="gap-2 border-border hover:bg-accent">
-            <BrainCircuit className="h-4 w-4" />
-            AI Suggest
-          </Button>
-          <Button className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+          <Button className="flex-1 sm:flex-none gap-2 bg-primary text-primary-foreground hover:bg-primary/90">
             <Plus className="h-4 w-4" />
             Create Skill
+          </Button>
+          <Button variant="outline" className="flex-1 sm:flex-none gap-2 border-border hover:bg-accent order-first sm:order-none">
+            <BrainCircuit className="h-4 w-4" />
+            AI Suggest
           </Button>
         </div>
       </div>
 
       {/* Search/Filters */}
-      <div className="mb-6">
-        <div className="relative max-w-sm">
+      <div className="mb-8">
+        <div className="relative w-full sm:max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input 
             placeholder="Поиск по названию или тегу..." 
-            className="pl-10 bg-card border-border"
+            className="pl-10 w-full bg-card border-border focus-visible:ring-primary"
           />
         </div>
       </div>
 
       {/* Grid Section */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 overflow-auto pb-8">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6 overflow-auto pb-10">
         {MOCK_BIO_CAPABILITIES.map((cap) => (
-          <Card key={cap.id} className="bg-card border-border hover:border-primary/50 transition-all group overflow-hidden flex flex-col">
-            <CardHeader className="pb-3">
+          <Card key={cap.id} className="bg-card border-border hover:border-primary/50 transition-all group overflow-hidden flex flex-col h-full">
+            <CardHeader className="p-4 sm:p-6 pb-2 sm:pb-3">
               <div className="flex items-start justify-between">
                 <div className="bg-primary/10 p-2 rounded-lg mb-2">
                   <Zap className="h-5 w-5 text-primary" />
@@ -122,8 +122,8 @@ const Capabilities: React.FC = () => {
                 {cap.aiTag}
               </Badge>
             </CardHeader>
-            <CardContent className="flex-1">
-              <p className="text-sm text-muted-foreground leading-relaxed">
+            <CardContent className="p-4 sm:p-6 pt-0 sm:pt-0 flex-1">
+              <p className="text-sm text-muted-foreground leading-relaxed line-clamp-3">
                 {cap.description}
               </p>
               
@@ -138,7 +138,7 @@ const Capabilities: React.FC = () => {
                 </div>
               </div>
             </CardContent>
-            <CardFooter className="pt-4 border-t border-border bg-muted/20">
+            <CardFooter className="p-3 sm:p-4 border-t border-border bg-muted/20">
               <div className="flex items-center justify-between w-full">
                 <Button variant="ghost" size="sm" className="text-xs text-foreground hover:text-primary">
                   Edit Mapping
@@ -152,7 +152,7 @@ const Capabilities: React.FC = () => {
         ))}
 
         {/* Create Placeholder Card */}
-        <button className="border-2 border-dashed border-border rounded-xl flex flex-col items-center justify-center p-8 hover:border-primary/30 hover:bg-primary/5 transition-all text-muted-foreground hover:text-primary group">
+        <button className="border-2 border-dashed border-border rounded-xl flex flex-col items-center justify-center p-6 sm:p-8 hover:border-primary/30 hover:bg-primary/5 transition-all text-muted-foreground hover:text-primary group min-h-[280px] h-full">
           <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center mb-4 group-hover:bg-primary/10">
             <Plus className="h-6 w-6" />
           </div>

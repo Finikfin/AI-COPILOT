@@ -142,6 +142,44 @@ POST|`/api/v1/actions/ingest`|Загрузка файла OpenAPI (Multipart for
 GET|`/api/v1/actions`|Получение списка всех импортированных методов с фильтрацией.
 GET|`/api/v1/actions/{id}`|Детальная схема конкретного экшена.
 DELETE|`/api/v1/actions/{id}`|Удаление экшена (если API обновилось или метод больше не нужен).
+
+#### Пример запроса ingest
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/actions/ingest" \
+  -H "Accept: application/json" \
+  -F "file=@/app/examples/travel.yaml;type=application/yaml"
+```
+
+#### Пример ответа ingest
+
+```json
+{
+  "created_actions_count": 5,
+  "created_capabilities_count": 5,
+  "capabilities": [
+    {
+      "id": "7c1d5c9b-2c9d-4f1c-9d2e-4a8f3e1b7a11",
+      "action_id": "e4b0bcb6-6a8c-4b0a-8e18-3f44b5f7d1c2",
+      "name": "get_recent_users",
+      "description": "Get recent users for travel campaigns",
+      "input_schema": null,
+      "output_schema": {
+        "type": "object"
+      },
+      "data_format": {
+        "parameter_locations": ["query"],
+        "request_content_types": [],
+        "request_schema_type": null,
+        "response_content_types": ["application/json"],
+        "response_schema_types": ["object"]
+      },
+      "created_at": "2026-03-14T12:00:00Z",
+      "updated_at": "2026-03-14T12:00:00Z"
+    }
+  ]
+}
+```
 ### Capabilities
 Превращаем API в способности
 Метод|Путь|Описание
