@@ -12,6 +12,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { Layout } from "@/components/layout/Layout";
 import Actions from "./pages/Actions";
+import Home from "./pages/Home";
 import Capabilities from "./pages/Capabilities";
 import Pipelines from "./pages/Pipelines";
 import NotFound from "./pages/NotFound";
@@ -36,8 +37,8 @@ const AppRoutes = () => {
     <Routes>
       {/* Main layout wrapper for all authenticated pages */}
       <Route path="/" element={<Layout />}>
-        {/* Redirect base path to actions */}
-        <Route index element={<Navigate to="/actions" replace />} />
+        {/* Home page as the initial screen */}
+        <Route index element={<Home />} />
         
         {/* Actions - Technical API methods */}
         <Route path="actions" element={<Actions />} />
