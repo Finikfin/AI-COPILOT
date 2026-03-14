@@ -4,11 +4,11 @@ import json
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Capability, Pipeline, PipelineStatus
 from app.schemas.pipeline_chat_sch import PipelineGraphEdge, PipelineGraphNode
+from app.services.capability_service import CapabilityService
 from app.services.dialog_memory import DialogMemoryService
 from app.utils.ollama_client import chat_json
 
@@ -91,11 +91,8 @@ class PipelineGenerationService:
         }
 
     async def _load_capabilities(self, capability_ids: list[UUID] | None) -> list[Capability]:
-        query = select(Capability).order_by(Capability.created_at.asc())
-        if capability_ids:
-            query = query.where(Capability.id.in_(capability_ids))
-        result = await self.session.execute(query)
-        return list(result.scalars().all())
+        capability_service = CapabilityService(self.session)
+        return await capability_service.get_capabilities(capability_ids=capability_ids)
 
     def _build_generation_prompt(
         self,

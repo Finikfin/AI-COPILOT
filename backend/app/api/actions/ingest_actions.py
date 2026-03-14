@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database.session import get_session
 from app.models import Action, ActionIngestStatus
 from app.schemas.capability_sch import ActionIngestWithCapabilitiesResponse
-from app.services.capability_ingestion import build_capabilities_from_actions
+from app.services.capability_service import CapabilityService
 from app.services.openapi_ingestion import extract_actions_with_failures_from_document, load_openapi_document
 
 
@@ -36,8 +36,8 @@ async def ingest_actions(
     succeeded_actions = [action for action in actions if action.ingest_status == ActionIngestStatus.SUCCEEDED]
     failed_actions = [action for action in actions if action.ingest_status == ActionIngestStatus.FAILED]
 
-    capabilities = build_capabilities_from_actions(succeeded_actions)
-    session.add_all(capabilities)
+    capability_service = CapabilityService(session)
+    capabilities = await capability_service.create_from_actions(succeeded_actions, refresh=False)
     await session.commit()
 
     for action in actions:

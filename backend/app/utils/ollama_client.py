@@ -51,7 +51,7 @@ async def summarize_dialog_text(messages: list[dict[str, Any]]) -> str | None:
 
 
 def _call_ollama_json(system_prompt: str, user_prompt: str) -> dict[str, Any] | None:
-    host = os.getenv("OLLAMA_HOST", "http://158.160.90.60:11434у ")
+    host = os.getenv("OLLAMA_HOST", "http://158.160.90.60:8067").strip()
     model = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
     headers = _load_headers()
 
