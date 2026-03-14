@@ -76,7 +76,7 @@ media/
 *.bin
 *.pt
 *.safetensors
-models/
+/models/
 
 # =========================
 # IDE и ОС
