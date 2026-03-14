@@ -7,7 +7,7 @@ from app.core.database.session import get_session
 from app.models import Action, ActionIngestStatus
 from app.schemas.capability_sch import ActionIngestWithCapabilitiesResponse
 from app.services.capability_service import CapabilityService
-from app.services.openapi_ingestion import extract_actions_with_failures_from_document, load_openapi_document
+from app.services.openapi_service import OpenAPIService
 
 
 router = APIRouter(tags=["Actions"])
@@ -20,8 +20,8 @@ async def ingest_actions(
 ):
     payload = await file.read()
     try:
-        document = load_openapi_document(payload)
-        ingestion_result = extract_actions_with_failures_from_document(document, source_filename=file.filename)
+        document = OpenAPIService.load_document(payload)
+        ingestion_result = OpenAPIService.extract_actions_with_failures(document, source_filename=file.filename)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
