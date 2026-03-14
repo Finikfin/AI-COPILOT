@@ -1,0 +1,266 @@
+from __future__ import annotations
+
+import re
+from typing import Any
+
+import yaml
+
+from app.models import HttpMethod
+
+
+SUPPORTED_METHODS = {method.value.lower(): method for method in HttpMethod}
+JSON_CONTENT_TYPES = ("application/json", "application/*+json")
+
+
+def load_openapi_document(raw_bytes: bytes) -> dict[str, Any]:
+    if not raw_bytes:
+        raise ValueError("OpenAPI file is empty")
+
+    try:
+        document = yaml.safe_load(raw_bytes.decode("utf-8"))
+    except UnicodeDecodeError as exc:
+        raise ValueError("OpenAPI file must be UTF-8 encoded") from exc
+    except yaml.YAMLError as exc:
+        raise ValueError("OpenAPI file is not valid YAML or JSON") from exc
+
+    if not isinstance(document, dict):
+        raise ValueError("OpenAPI root must be an object")
+
+    openapi_version = document.get("openapi")
+    if not isinstance(openapi_version, str) or not openapi_version.startswith("3."):
+        raise ValueError("Only OpenAPI 3.x documents are supported")
+
+    if not isinstance(document.get("paths"), dict) or not document["paths"]:
+        raise ValueError("OpenAPI file must contain a non-empty paths section")
+
+    return document
+
+
+def extract_actions_from_document(
+    document: dict[str, Any],
+    *,
+    source_filename: str | None = None,
+) -> list[dict[str, Any]]:
+    base_url = _extract_base_url(document)
+    actions: list[dict[str, Any]] = []
+
+    for path, path_item in document.get("paths", {}).items():
+        if not isinstance(path_item, dict):
+            continue
+
+        shared_parameters = path_item.get("parameters", [])
+
+        for method_name, operation in path_item.items():
+            if method_name not in SUPPORTED_METHODS:
+                continue
+            if not isinstance(operation, dict):
+                continue
+
+            normalized_operation = _dereference(operation, document)
+            parameters = _merge_parameters(shared_parameters, normalized_operation.get("parameters", []), document)
+
+            actions.append(
+                {
+                    "operation_id": normalized_operation.get("operationId") or _build_operation_id(method_name, path),
+                    "method": SUPPORTED_METHODS[method_name],
+                    "path": path,
+                    "base_url": base_url,
+                    "summary": normalized_operation.get("summary"),
+                    "description": normalized_operation.get("description"),
+                    "tags": normalized_operation.get("tags"),
+                    "parameters_schema": _build_parameters_schema(parameters, document),
+                    "request_body_schema": _extract_request_body_schema(normalized_operation, document),
+                    "response_schema": _extract_response_schema(normalized_operation, document),
+                    "source_filename": source_filename,
+                    "raw_spec": normalized_operation,
+                }
+            )
+
+    return actions
+
+
+def _extract_base_url(document: dict[str, Any]) -> str | None:
+    servers = document.get("servers")
+    if isinstance(servers, list) and servers:
+        first_server = servers[0]
+        if isinstance(first_server, dict):
+            return first_server.get("url")
+    return None
+
+
+def _merge_parameters(
+    path_parameters: list[Any] | None,
+    operation_parameters: list[Any] | None,
+    document: dict[str, Any],
+) -> list[dict[str, Any]]:
+    merged: dict[tuple[str | None, str | None], dict[str, Any]] = {}
+
+    for raw_parameter in (path_parameters or []) + (operation_parameters or []):
+        parameter = _dereference(raw_parameter, document)
+        if not isinstance(parameter, dict):
+            continue
+        key = (parameter.get("name"), parameter.get("in"))
+        merged[key] = parameter
+
+    return list(merged.values())
+
+
+def _build_parameters_schema(
+    parameters: list[dict[str, Any]],
+    document: dict[str, Any],
+) -> dict[str, Any] | None:
+    if not parameters:
+        return None
+
+    properties: dict[str, Any] = {}
+    required: list[str] = []
+
+    for parameter in parameters:
+        name = parameter.get("name")
+        if not name:
+            continue
+        if parameter.get("in") not in {"query", "path", "header", "cookie"}:
+            continue
+
+        schema = parameter.get("schema")
+        if schema is None:
+            schema = _extract_schema_from_content(parameter.get("content"), document)
+        else:
+            schema = _dereference(schema, document)
+
+        property_schema = schema if isinstance(schema, dict) else {"type": "string"}
+        property_schema = {
+            **property_schema,
+            "x-parameter-location": parameter.get("in"),
+        }
+
+        if parameter.get("description"):
+            property_schema["description"] = parameter["description"]
+
+        properties[name] = property_schema
+
+        if parameter.get("required"):
+            required.append(name)
+
+    if not properties:
+        return None
+
+    schema: dict[str, Any] = {
+        "type": "object",
+        "properties": properties,
+    }
+    if required:
+        schema["required"] = required
+
+    return schema
+
+
+def _extract_request_body_schema(
+    operation: dict[str, Any],
+    document: dict[str, Any],
+) -> dict[str, Any] | None:
+    request_body = operation.get("requestBody")
+    if not isinstance(request_body, dict):
+        return None
+    request_body = _dereference(request_body, document)
+    schema = _extract_schema_from_content(request_body.get("content"), document)
+    if not isinstance(schema, dict):
+        return None
+
+    if request_body.get("required"):
+        schema = {**schema, "x-required": True}
+
+    return schema
+
+
+def _extract_response_schema(
+    operation: dict[str, Any],
+    document: dict[str, Any],
+) -> dict[str, Any] | None:
+    responses = operation.get("responses")
+    if not isinstance(responses, dict):
+        return None
+
+    for status_code, response in responses.items():
+        if not str(status_code).startswith("2"):
+            continue
+
+        normalized_response = _dereference(response, document)
+        if not isinstance(normalized_response, dict):
+            continue
+
+        schema = _extract_schema_from_content(normalized_response.get("content"), document)
+        if isinstance(schema, dict):
+            return schema
+
+        if normalized_response.get("description"):
+            return {"description": normalized_response["description"]}
+
+    return None
+
+
+def _extract_schema_from_content(content: Any, document: dict[str, Any]) -> dict[str, Any] | None:
+    if not isinstance(content, dict):
+        return None
+
+    preferred_content_type = next((content_type for content_type in JSON_CONTENT_TYPES if content_type in content), None)
+    items = []
+    if preferred_content_type:
+        items.append((preferred_content_type, content[preferred_content_type]))
+    items.extend((content_type, value) for content_type, value in content.items() if content_type != preferred_content_type)
+
+    for content_type, value in items:
+        if not isinstance(value, dict):
+            continue
+        schema = value.get("schema")
+        if not isinstance(schema, dict):
+            continue
+
+        normalized_schema = _dereference(schema, document)
+        if isinstance(normalized_schema, dict):
+            return {
+                **normalized_schema,
+                "x-content-type": content_type,
+            }
+
+    return None
+
+
+def _dereference(value: Any, document: dict[str, Any]) -> Any:
+    if isinstance(value, list):
+        return [_dereference(item, document) for item in value]
+
+    if not isinstance(value, dict):
+        return value
+
+    if "$ref" in value:
+        resolved = _resolve_ref(value["$ref"], document)
+        merged = _dereference(resolved, document)
+        if not isinstance(merged, dict):
+            return merged
+
+        sibling_fields = {key: _dereference(item, document) for key, item in value.items() if key != "$ref"}
+        return {**merged, **sibling_fields}
+
+    return {key: _dereference(item, document) for key, item in value.items()}
+
+
+def _resolve_ref(ref: str, document: dict[str, Any]) -> Any:
+    if not ref.startswith("#/"):
+        raise ValueError(f"Only local $ref values are supported, got: {ref}")
+
+    current: Any = document
+    for part in ref[2:].split("/"):
+        token = part.replace("~1", "/").replace("~0", "~")
+        if not isinstance(current, dict) or token not in current:
+            raise ValueError(f"Could not resolve OpenAPI reference: {ref}")
+        current = current[token]
+
+    return current
+
+
+def _build_operation_id(method_name: str, path: str) -> str:
+    normalized_path = re.sub(r"[{}]", "", path).strip("/")
+    normalized_path = re.sub(r"[^a-zA-Z0-9/]+", "_", normalized_path)
+    normalized_path = normalized_path.replace("/", "_") or "root"
+    return f"{method_name.lower()}_{normalized_path.lower()}"

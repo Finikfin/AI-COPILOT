@@ -2,7 +2,7 @@ import asyncio
 import os
 from sqlalchemy import select
 
-from app.core.database.models import Base, User, UserRole
+from app.models import Base, User, UserRole
 from app.core.database.session import SessionLocal, engine
 from app.utils.hashing import hash_password
 

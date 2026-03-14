@@ -8,7 +8,7 @@ from sqlalchemy import select
 from typing import List
 from uuid import UUID
 
-from app.core.database.models import User, UserRole
+from app.models import User, UserRole
 from app.core.database.session import get_session
 
 JWT_SECRET = os.environ.get("JWT_SECRET", "super_secret_key_123")

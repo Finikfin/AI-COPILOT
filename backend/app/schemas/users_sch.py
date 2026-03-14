@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 
 from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator
-from app.core.database.models import UserRole
+from app.models import UserRole
 
 
 class UserBase(BaseModel):

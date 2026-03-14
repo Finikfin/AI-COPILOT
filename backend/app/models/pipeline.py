@@ -6,7 +6,7 @@ from sqlalchemy import Enum, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.database.models.base import Base, TimestampMixin
+from app.models.base import Base, TimestampMixin
 
 
 class PipelineStatus(str, enum.Enum):

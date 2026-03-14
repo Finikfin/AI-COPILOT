@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.core.database.session import get_session
-from app.core.database.models import User
+from app.models import User
 from app.utils.token_manager import get_current_user
 from app.schemas.users_sch import UserUpdateMe, UserResponse
 

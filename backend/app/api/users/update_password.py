@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database.session import get_session
-from app.core.database.models import User
+from app.models import User
 from app.utils.token_manager import get_current_user
 from app.utils.hashing import verify_password, hash_password
 from app.schemas.users_sch import PasswordUpdate
