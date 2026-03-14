@@ -55,16 +55,13 @@ export const SwaggerImportModal: React.FC<SwaggerImportModalProps> = ({
         const content = e.target?.result as string;
 
         try {
+          const formData = new FormData();
+          const fileBlob = new Blob([content], { type: selectedFile.type });
+          formData.append('file', fileBlob, selectedFile.name);
+
           const response = await fetch('/api/v1/actions/ingest', {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              type: 'file',
-              filename: selectedFile.name,
-              content: content
-            }),
+            body: formData,
           });
 
           if (!response.ok) throw new Error('Failed to import');
@@ -95,15 +92,13 @@ export const SwaggerImportModal: React.FC<SwaggerImportModalProps> = ({
 
     setIsImporting(true);
     try {
+      const formData = new FormData();
+      const specBlob = new Blob([spec], { type: 'application/json' });
+      formData.append('file', specBlob, 'manual_import.json');
+
       const response = await fetch('/api/v1/actions/ingest', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          type: 'manual',
-          content: spec
-        }),
+        body: formData,
       });
 
       if (!response.ok) throw new Error('Failed to import');

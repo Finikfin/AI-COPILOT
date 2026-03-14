@@ -18,7 +18,9 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-
+    networks:
+      - shop-network
+      - default
 
   db:
     image: postgres:15-alpine
@@ -33,6 +35,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - default
 
   redis:
     image: redis:7-alpine
@@ -43,3 +47,9 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - default
+
+networks:
+  shop-network:
+    external: true

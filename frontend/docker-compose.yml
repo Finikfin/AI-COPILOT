@@ -4,3 +4,9 @@ services:
     restart: always
     ports:
       - "8000:80"
+    networks:
+      - shop-network
+
+networks:
+  shop-network:
+    external: true
