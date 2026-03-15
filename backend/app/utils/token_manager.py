@@ -8,6 +8,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
 
 from app.core.database.session import get_session
 from app.models import User, UserRole
@@ -52,7 +53,18 @@ async def get_current_user(
     session: AsyncSession = Depends(get_session),
 ) -> User:
     if MOCK_AUTH_ENABLED:
-        return _build_mock_user()
+        mock_user = _build_mock_user()
+        existing_user = await session.get(User, mock_user.id)
+        if existing_user is not None:
+            return existing_user
+
+        session.add(mock_user)
+        try:
+            await session.commit()
+        except IntegrityError:
+            await session.rollback()
+        existing_user = await session.get(User, mock_user.id)
+        return existing_user or mock_user
 
     if creds is None:
         raise HTTPException(

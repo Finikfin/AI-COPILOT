@@ -9,6 +9,11 @@ from app.models.execution import (
     ExecutionStepStatus,
 )
 from app.models.pipeline import Pipeline, PipelineStatus
+from app.models.pipeline_dialog import (
+    DialogMessageRole,
+    PipelineDialog,
+    PipelineDialogMessage,
+)
 
 __all__ = [
     "Base",
@@ -24,4 +29,7 @@ __all__ = [
     "ExecutionStepStatus",
     "Pipeline",
     "PipelineStatus",
+    "DialogMessageRole",
+    "PipelineDialog",
+    "PipelineDialogMessage",
 ]

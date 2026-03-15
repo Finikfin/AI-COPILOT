@@ -11,6 +11,8 @@ export const ENDPOINTS = {
   },
   PIPELINES: {
     GENERATE: `${API_BASE_URL}/pipelines/generate`,
+    DIALOGS: `${API_BASE_URL}/pipelines/dialogs`,
+    DIALOG_HISTORY: (dialogId: string) => `${API_BASE_URL}/pipelines/dialogs/${dialogId}/history`,
     RUN: (pipelineId: string) => `${API_BASE_URL}/pipelines/${pipelineId}/run`,
   },
   EXECUTIONS: {

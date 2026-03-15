@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class PipelineInputTypeFromPrevious(BaseModel):
@@ -61,3 +62,31 @@ class DialogResetRequest(BaseModel):
 class DialogResetResponse(BaseModel):
     status: Literal["ok"]
     message_ru: str
+
+
+class PipelineDialogListItemResponse(BaseModel):
+    dialog_id: UUID
+    title: str | None = None
+    last_status: str | None = None
+    last_pipeline_id: UUID | None = None
+    last_message_preview: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PipelineDialogMessageResponse(BaseModel):
+    id: UUID
+    role: Literal["user", "assistant"]
+    content: str
+    assistant_payload: dict[str, Any] | None = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PipelineDialogHistoryResponse(BaseModel):
+    dialog_id: UUID
+    title: str | None = None
+    messages: list[PipelineDialogMessageResponse] = Field(default_factory=list)

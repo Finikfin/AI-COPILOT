@@ -77,3 +77,9 @@ class Pipeline(TimestampMixin, Base):
     )
 
     creator = relationship("User", lazy="select")
+    dialogs = relationship(
+        "PipelineDialog",
+        back_populates="last_pipeline",
+        passive_deletes=True,
+        lazy="selectin",
+    )

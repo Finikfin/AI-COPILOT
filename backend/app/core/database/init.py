@@ -7,9 +7,12 @@ from app.models import (
     Action,
     Base,
     Capability,
+    DialogMessageRole,
     ExecutionRun,
     ExecutionStepRun,
     Pipeline,
+    PipelineDialog,
+    PipelineDialogMessage,
     User,
     UserRole,
 )
@@ -42,6 +45,14 @@ BEGIN
     ALTER TABLE capabilities ALTER COLUMN action_id DROP NOT NULL;
     
     CREATE INDEX IF NOT EXISTS ix_capabilities_type ON capabilities (type);
+  END IF;
+  IF to_regclass('public.pipeline_dialogs') IS NOT NULL THEN
+    CREATE INDEX IF NOT EXISTS ix_pipeline_dialogs_user_updated_at_desc
+      ON pipeline_dialogs (user_id, updated_at DESC);
+  END IF;
+  IF to_regclass('public.pipeline_dialog_messages') IS NOT NULL THEN
+    CREATE INDEX IF NOT EXISTS ix_pipeline_dialog_messages_dialog_created_at_asc
+      ON pipeline_dialog_messages (dialog_id, created_at ASC);
   END IF;
 END $$;
 """

@@ -3,7 +3,7 @@ import uuid
 
 from sqlalchemy import Boolean, Enum, String
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
 
@@ -27,3 +27,11 @@ class User(TimestampMixin, Base):
         server_default=UserRole.USER.value,
     )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+
+    pipeline_dialogs = relationship(
+        "PipelineDialog",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        lazy="selectin",
+    )
