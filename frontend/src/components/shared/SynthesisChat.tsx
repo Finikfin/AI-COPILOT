@@ -58,7 +58,6 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
     }
   }, [initialMessage]);
 
-  const { setPipeline } = usePipelineContext();
   const [isTyping, setIsTyping] = useState(false);
 
   const handleSend = async (overrideValue?: string) => {
@@ -78,25 +77,20 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
     }]);
 
     try {
-      const data = await generatePipeline({
+      const response = await generatePipeline({
         dialog_id: dialogId,
         message: userMessage,
         user_id: null,
         capability_ids: null
       });
 
-      // Update Pipeline Global State
-      if (data.status === 'ready' || data.status === 'success' as any) {
-        setPipeline(data as any);
-      }
-
       setMessages(prev => {
         const newMessages = [...prev];
         const lastIndex = newMessages.length - 1;
-        newMessages[lastIndex] = { 
-          role: 'assistant', 
+        newMessages[lastIndex] = {
+          role: 'assistant',
           content: response.chat_reply_ru || response.message_ru || (response.status === 'ready' ? 'Я подготовил Pipeline для вашей задачи.' : 'Произошла ошибка при генерации.'),
-          isGenerating: false 
+          isGenerating: false
         };
         return newMessages;
       });
