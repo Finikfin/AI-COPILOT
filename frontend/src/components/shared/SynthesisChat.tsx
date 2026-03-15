@@ -157,8 +157,8 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
               </div>
               <div className={cn(
                 "p-3 rounded-2xl text-sm leading-relaxed shadow-sm border",
-                msg.role === 'assistant' 
-                  ? "bg-card border-border text-foreground" 
+                msg.role === 'assistant'
+                  ? "bg-card border-border text-foreground"
                   : "bg-primary text-primary-foreground border-primary"
               )}>
                 {msg.content}
@@ -178,24 +178,24 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
       <div className="p-4 border-t border-border space-y-3">
         {messages.length > 2 && (
           <div className="flex gap-2 mb-2">
-             <Button variant="outline" size="sm" className="h-7 text-[10px] gap-1 border-border">
-               <RotateCcw className="h-3 w-3" /> Пересобрать
-             </Button>
-             <Button variant="outline" size="sm" className="h-7 text-[10px] gap-1 border-border text-primary">
-               <CheckCircle2 className="h-3 w-3" /> Подтвердить
-             </Button>
+            <Button variant="outline" size="sm" className="h-7 text-[10px] gap-1 border-border">
+              <RotateCcw className="h-3 w-3" /> Пересобрать
+            </Button>
+            <Button variant="outline" size="sm" className="h-7 text-[10px] gap-1 border-border text-primary">
+              <CheckCircle2 className="h-3 w-3" /> Подтвердить
+            </Button>
           </div>
         )}
         <div className="relative">
-          <Input 
-            placeholder="Опишите задачу..." 
+          <Input
+            placeholder="Опишите задачу..."
             className="pr-12 bg-background border-border h-11"
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
           />
-          <Button 
-            size="sm" 
+          <Button
+            size="sm"
             className="absolute right-1 top-1 h-9 w-9 p-0 bg-primary hover:bg-primary/90"
             onClick={() => handleSend()}
           >
