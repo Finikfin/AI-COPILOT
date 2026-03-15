@@ -3,7 +3,7 @@ services:
     image: ${DOCKER_IMAGE:-frontend-web}:${TAG:-latest}
     restart: always
     ports:
-      - "8000:80"
+      - "80:80"
     networks:
       - shop-network
 
