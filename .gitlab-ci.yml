@@ -119,7 +119,8 @@ deploy-frontend:
     - |
       ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_IP "
         cd ~/backend &&
-        git pull &&
+        git fetch --all &&
+        git reset --hard origin/твоя_ветка &&
         cd frontend &&
         echo 'DOCKER_IMAGE=$FRONTEND_IMAGE' > .env &&
         echo 'TAG=$CI_COMMIT_SHORT_SHA' >> .env &&
