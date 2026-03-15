@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database.session import get_session
 from app.schemas.pipeline_chat_sch import PipelineGenerateRequest, PipelineGenerateResponse
-from app.services.pipeline_generation import PipelineGenerationService
+from app.services.pipeline_service import PipelineService
 
 
 router = APIRouter(tags=["Pipelines"])
@@ -16,7 +16,7 @@ async def generate_pipeline(
     payload: PipelineGenerateRequest,
     session: AsyncSession = Depends(get_session),
 ):
-    service = PipelineGenerationService(session)
+    service = PipelineService(session)
     try:
         result = await service.generate(
             dialog_id=payload.dialog_id,

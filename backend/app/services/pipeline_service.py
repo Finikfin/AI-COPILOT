@@ -13,11 +13,11 @@ from app.services.semantic_selection import SelectedCapability, SemanticSelectio
 from app.utils.ollama_client import chat_json, reset_model_session
 
 
-class PipelineGenerationError(Exception):
+class PipelineServiceError(Exception):
     pass
 
 
-class PipelineGenerationService:
+class PipelineService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
         self.capability_service = CapabilityService(session)
@@ -69,7 +69,7 @@ class PipelineGenerationService:
 
         try:
             raw_graph = self.generate_raw_graph(message, selected_capabilities, prompt)
-        except PipelineGenerationError as exc:
+        except PipelineServiceError as exc:
             return {
                 "status": "cannot_build",
                 "message_ru": str(exc),
@@ -142,7 +142,7 @@ class PipelineGenerationService:
         reset_model_session()
         payload = chat_json(system_prompt=system_prompt, user_prompt=prompt)
         if not isinstance(payload, dict):
-            raise PipelineGenerationError("Failed to call Ollama")
+            raise PipelineServiceError("Failed to call Ollama")
         return payload
 
     def _build_generation_prompt(

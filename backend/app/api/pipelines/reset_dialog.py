@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database.session import get_session
 from app.schemas.pipeline_chat_sch import DialogResetRequest, DialogResetResponse
-from app.services.pipeline_generation import PipelineGenerationService
+from app.services.pipeline_service import PipelineService
 
 
 router = APIRouter(tags=["Pipelines"])
@@ -16,6 +16,6 @@ async def reset_pipeline_dialog(
     payload: DialogResetRequest,
     session: AsyncSession = Depends(get_session),
 ):
-    service = PipelineGenerationService(session)
+    service = PipelineService(session)
     result = await service.reset_dialog(payload.dialog_id)
     return DialogResetResponse(**result)

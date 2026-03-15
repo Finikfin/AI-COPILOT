@@ -12,7 +12,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { generatePipeline } from '@/api/chat';
 import { generateUUID } from '@/lib/utils';
 
 const Home: React.FC = () => {
@@ -31,15 +30,6 @@ const Home: React.FC = () => {
 
     const dialogId = generateUUID();
 
-    // Send message to generate pipeline endpoint
-    await generatePipeline({
-      dialog_id: dialogId,
-      message: chatMessage,
-      user_id: null,
-      capability_ids: null
-    });
-
-    // Navigate to pipelines page with the message and dialog state
     navigate('/pipelines', {
       state: {
         initialMessage: chatMessage,

@@ -8,13 +8,14 @@ export interface GeneratePipelineRequest {
 }
 
 export interface GeneratePipelineResponse {
-  status: 'success' | 'cannot_build' | 'error';
+  status: 'ready' | 'success' | 'needs_input' | 'cannot_build' | 'error';
   message_ru: string;
+  chat_reply_ru?: string;
   pipeline_id: string | null;
   nodes: any[];
   edges: any[];
-  missing_requirements: string[];
-  context_summary: string;
+  missing_requirements?: string[];
+  context_summary: string | null;
 }
 
 export const generatePipeline = async (request: GeneratePipelineRequest): Promise<GeneratePipelineResponse> => {

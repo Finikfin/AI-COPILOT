@@ -13,6 +13,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { cn, generateUUID } from '@/lib/utils';
 import { generatePipeline } from '@/api/chat';
+import { usePipelineContext } from '@/contexts/PipelineContext';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -33,6 +34,7 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
   initialMessage,
   initialDialogId 
 }) => {
+  const { setPipeline } = usePipelineContext();
   const [messages, setMessages] = useState<Message[]>([
     { 
       role: 'assistant', 
@@ -85,17 +87,33 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
         const lastIndex = newMessages.length - 1;
         newMessages[lastIndex] = { 
           role: 'assistant', 
-          content: response.message_ru || (response.status === 'success' ? 'Я подготовил Pipeline для вашей задачи.' : 'Произошла ошибка при генерации.'),
+          content: response.chat_reply_ru || response.message_ru || (response.status === 'ready' ? 'Я подготовил Pipeline для вашей задачи.' : 'Произошла ошибка при генерации.'),
           isGenerating: false 
         };
         return newMessages;
       });
 
-      if (response.status === 'success' && onSynthesize) {
+      if ((response.status === 'ready' || response.status === 'success') && response.nodes.length > 0) {
+        setPipeline({
+          status: response.status,
+          message_ru: response.message_ru,
+          chat_reply_ru: response.chat_reply_ru || response.message_ru,
+          pipeline_id: response.pipeline_id,
+          nodes: response.nodes,
+          edges: response.edges,
+          missing_requirements: response.missing_requirements || [],
+          context_summary: response.context_summary,
+        });
+      } else {
+        setPipeline(null);
+      }
+
+      if ((response.status === 'ready' || response.status === 'success') && onSynthesize) {
         onSynthesize(userMessage);
       }
     } catch (error) {
       console.error('Error in chat:', error);
+      setPipeline(null);
       setMessages(prev => {
         const newMessages = [...prev];
         const lastIndex = newMessages.length - 1;
