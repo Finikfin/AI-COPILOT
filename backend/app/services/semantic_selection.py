@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from typing import NamedTuple
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -130,13 +131,17 @@ class SemanticSelectionService:
         self,
         session: AsyncSession,
         user_query: str,
+        owner_user_id: UUID | None = None,
         limit: int = 10,
     ) -> list[SelectedCapability]:
         query_tokens = self._tokenize(user_query)
         if not query_tokens:
             return []
 
-        query = select(Capability).order_by(Capability.created_at.asc()).limit(200)
+        query = select(Capability).order_by(Capability.created_at.asc())
+        if owner_user_id is not None:
+            query = query.where(Capability.user_id == owner_user_id)
+        query = query.limit(200)
         result = await session.execute(query)
         capabilities = list(result.scalars().all())
         ranked: list[SelectedCapability] = []

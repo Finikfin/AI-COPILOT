@@ -28,6 +28,10 @@ async def generate_pipeline(
             user_id=current_user.id,
             content=payload.message,
         )
+        dialog = await dialog_service.get_dialog(
+            dialog_id=payload.dialog_id,
+            user_id=current_user.id,
+        )
     except DialogAccessError as exc:
         detail = str(exc)
         if "denied" in detail:
@@ -40,6 +44,7 @@ async def generate_pipeline(
             message=payload.message,
             user_id=current_user.id,
             capability_ids=payload.capability_ids,
+            previous_pipeline_id=dialog.last_pipeline_id,
         )
     except Exception as exc:
         if "ollama" in str(exc).lower():
@@ -63,7 +68,7 @@ async def generate_pipeline(
             dialog_id=payload.dialog_id,
             user_id=current_user.id,
             content=response_payload.chat_reply_ru or response_payload.message_ru,
-            assistant_payload=response_payload.model_dump(mode="json"),
+            assistant_payload=response_payload.model_dump(mode="json", exclude_none=True),
         )
     except DialogAccessError as exc:
         detail = str(exc)
