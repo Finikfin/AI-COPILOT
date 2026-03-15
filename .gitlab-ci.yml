@@ -4,6 +4,9 @@ stages:
   - build
   - deploy
 
+default:
+  retry: 2
+
 variables:
   PYTHON_IMAGE: "python:3.12-slim"
   NODE_IMAGE: "node:20-slim"
