@@ -18,7 +18,7 @@ import { toast } from 'sonner';
 interface SwaggerImportModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onImport: (data: any) => void;
+  onImport: (data: any, filename?: string) => void;
 }
 
 export const SwaggerImportModal: React.FC<SwaggerImportModalProps> = ({
@@ -84,7 +84,7 @@ export const SwaggerImportModal: React.FC<SwaggerImportModalProps> = ({
 
       const result = await response.json();
       toast.success(`Файл ${selectedFile.name} успешно импортирован на сервер`);
-      onImport(result);
+      onImport(result, selectedFile.name);
       onClose();
     } catch (error: any) {
       toast.error(error.message || 'Ошибка при отправке файла на сервер');
@@ -125,7 +125,7 @@ export const SwaggerImportModal: React.FC<SwaggerImportModalProps> = ({
 
       const result = await response.json();
       toast.success('Методы успешно импортированы на сервер');
-      onImport(result);
+      onImport(result, 'manual_import.json');
       onClose();
     } catch (error: any) {
       toast.error(error.message || 'Ошибка при отправке спецификации на сервер');

@@ -12,7 +12,8 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { generateUUID } from '@/lib/utils';
+import { generateUUID, cn } from '@/lib/utils';
+import { motion, AnimatePresence } from 'framer-motion';
 
 const Home: React.FC = () => {
   const { addActions, addCapabilities } = useActionsContext();
@@ -20,6 +21,7 @@ const Home: React.FC = () => {
   const [isResultsModalOpen, setIsResultsModalOpen] = useState(false);
   const [importResults, setImportResults] = useState<{ succeeded_actions: Action[], failed_actions: any[] } | null>(null);
   const [chatMessage, setChatMessage] = useState('');
+  const [importedFiles, setImportedFiles] = useState<string[]>([]);
   const navigate = useNavigate();
 
 
@@ -63,22 +65,51 @@ const Home: React.FC = () => {
         <div className="max-w-2xl mx-auto w-full pt-8 animate-in fade-in slide-in-from-bottom-6 duration-700 delay-150">
           <form
             onSubmit={handleSendMessage}
-            className="relative group border border-border bg-card/50 backdrop-blur-xl rounded-2xl shadow-2xl p-2 focus-within:ring-2 focus-within:ring-primary/30 transition-all duration-300"
+            className={cn(
+              "relative group border border-border bg-card/50 backdrop-blur-xl rounded-2xl shadow-2xl transition-all duration-300 overflow-hidden",
+              importedFiles.length > 0 ? "p-3 pt-12" : "p-2"
+            )}
           >
-            <Input
-              value={chatMessage}
-              onChange={(e) => setChatMessage(e.target.value)}
-              placeholder="Как я могу помочь вам с вашими API сегодня?"
-              className="bg-transparent border-none shadow-none h-10 pl-4 pr-16 text-lg focus-visible:ring-0"
-            />
-            <div className="absolute right-2 top-2">
-              <Button
-                type="submit"
-                size="icon"
-                className="h-10 w-10 rounded-xl transition-transform active:scale-95 bg-primary hover:bg-primary/90"
-              >
-                <Send className="h-5 w-5" />
-              </Button>
+            {/* File Badges - Absolute position within the expanded container */}
+            <AnimatePresence>
+              {importedFiles.length > 0 && (
+                <motion.div 
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="absolute top-3 left-4 flex items-center gap-2"
+                >
+                  {importedFiles.slice(0, 2).map((file, idx) => (
+                    <div key={idx} className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-primary/10 border border-primary/20 text-[11px] font-medium text-primary">
+                      <FileJson className="h-3 w-3" />
+                      <span className="max-w-[100px] truncate">{file}</span>
+                    </div>
+                  ))}
+                  {importedFiles.length > 2 && (
+                    <div className="px-2 py-1 rounded-lg bg-muted border border-border text-[11px] font-medium text-muted-foreground">
+                      +{importedFiles.length - 2}
+                    </div>
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <div className="relative flex items-center">
+              <Input
+                value={chatMessage}
+                onChange={(e) => setChatMessage(e.target.value)}
+                placeholder={importedFiles.length > 0 ? "Сценарий готов к постройке..." : "Как я могу помочь вам с вашими API сегодня?"}
+                className="bg-transparent border-none shadow-none h-12 pl-4 pr-16 text-lg focus-visible:ring-0"
+              />
+              <div className="absolute right-0 top-1/2 -translate-y-1/2">
+                <Button
+                  type="submit"
+                  size="icon"
+                  className="h-10 w-10 rounded-xl transition-transform active:scale-95 bg-primary hover:bg-primary/90"
+                >
+                  <Send className="h-5 w-5" />
+                </Button>
+              </div>
             </div>
           </form>
           <div className="flex flex-wrap items-center justify-center gap-4 mt-6">
@@ -123,7 +154,7 @@ const Home: React.FC = () => {
       <SwaggerImportModal
         isOpen={isImportModalOpen}
         onClose={() => setIsImportModalOpen(false)}
-        onImport={(data) => {
+        onImport={(data, filename) => {
           if (data && (data.succeeded_actions || data.actions)) {
             const successList = data.succeeded_actions || data.actions || [];
             const failedList = data.failed_actions || [];
@@ -132,6 +163,12 @@ const Home: React.FC = () => {
             // Update global context with successful actions and capabilities
             addActions(successList);
             addCapabilities(capabilitiesList);
+
+            if (filename) {
+              setImportedFiles(prev => [...prev, filename]);
+            } else {
+              setImportedFiles(prev => [...prev, 'manual_import.json']);
+            }
 
             setImportResults({
               succeeded_actions: successList,
