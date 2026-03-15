@@ -1,15 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { User, AuthState } from "@/types/auth";
 import * as authApi from "@/api/auth";
-import * as authApi from "@/api/auth";
 
 interface AuthContextType extends AuthState {
-  login: (email: string, password: string) => Promise<void>;
-  register: (
-    email: string,
-    fullName: string,
-    password: string,
-  ) => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
   register: (
     email: string,
@@ -59,7 +52,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
     setAuthState({
       user,
-      user,
       isAuthenticated: true,
       token: accessToken,
     });
@@ -75,7 +67,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   ) => {
     const response = await authApi.register({
       email,
-      full_name: fullName,
+      fullName,
       password,
     });
     const { accessToken, user } = response;
