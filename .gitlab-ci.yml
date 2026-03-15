@@ -101,6 +101,10 @@ deploy-backend:
     - |
       ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_IP "
         cd ~/backend &&
+        rm -f .git/index.lock &&
+        sudo docker image prune -af || true &&
+        sudo docker builder prune -af || true &&
+        sudo docker container prune -f || true &&
         git fetch --all &&
         git reset --hard origin/master &&
         # Останавливаем старую версию, если она есть
@@ -120,6 +124,10 @@ deploy-frontend:
     - |
       ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_IP "
         cd ~/backend &&
+        rm -f .git/index.lock &&
+        sudo docker image prune -af || true &&
+        sudo docker builder prune -af || true &&
+        sudo docker container prune -f || true &&
         git fetch --all &&
         git reset --hard origin/master &&
         cd frontend &&
