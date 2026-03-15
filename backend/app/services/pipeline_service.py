@@ -40,8 +40,12 @@ class PipelineService:
         capability_ids: list[UUID] | None = None,
     ) -> dict[str, Any]:
         if capability_ids:
-            capabilities = await self.capability_service.get_capabilities(capability_ids=capability_ids)
-            selected_capabilities = [SelectedCapability(capability=c, score=1.0) for c in capabilities]
+            capabilities = await self.capability_service.get_capabilities(
+                capability_ids=capability_ids
+            )
+            selected_capabilities = [
+                SelectedCapability(capability=c, score=1.0) for c in capabilities
+            ]
         else:
             selected_capabilities = await self.semantic_selector.select_capabilities(
                 self.session,
@@ -59,7 +63,9 @@ class PipelineService:
                 "context_summary": None,
             }
 
-        dialog_messages, dialog_summary = await self.dialog_memory.get_context(str(dialog_id))
+        dialog_messages, dialog_summary = await self.dialog_memory.get_context(
+            str(dialog_id)
+        )
         prompt = self._build_generation_prompt(
             user_query=message,
             selected_capabilities=selected_capabilities,
@@ -79,16 +85,59 @@ class PipelineService:
                 "context_summary": dialog_summary,
             }
 
-        normalized_nodes, normalized_edges = self._normalize_workflow(raw_graph, selected_capabilities)
-        normalized_edges = self._repair_edges_with_data_flow(normalized_nodes, normalized_edges)
+        raw_graph = raw_graph or {}
+        # 1. Сначала проверяем, предложила ли модель новые макросы (composite capabilities)
+        new_macros = raw_graph.get("new_macros")
+        if isinstance(new_macros, list) and new_macros:
+            for macro_payload in new_macros:
+                try:
+                    await self.capability_service.create_composite_capability(
+                        name=macro_payload.get("name"),
+                        description=macro_payload.get("description"),
+                        input_schema=macro_payload.get("input_schema"),
+                        output_schema=macro_payload.get("output_schema"),
+                        recipe=macro_payload.get("recipe"),
+                    )
+                except Exception:
+                    continue  # Пропускаем битые макросы
+
+            # Перезагружаем капабилити, чтобы новые макросы стали доступны для нормализации
+            if capability_ids:
+                capabilities = await self.capability_service.get_capabilities(
+                    capability_ids=capability_ids
+                )
+                selected_capabilities = [
+                    SelectedCapability(capability=c, score=1.0) for c in capabilities
+                ]
+            else:
+                selected_capabilities = (
+                    await self.semantic_selector.select_capabilities(
+                        self.session,
+                        message,
+                        limit=10,
+                    )
+                )
+
+        normalized_nodes, normalized_edges = self._normalize_workflow(
+            raw_graph, selected_capabilities
+        )
+        normalized_edges = self._repair_edges_with_data_flow(
+            normalized_nodes, normalized_edges
+        )
         self._ensure_external_inputs(normalized_nodes, normalized_edges)
 
-        is_ready, missing = self._validate_ready_graph(normalized_nodes, normalized_edges)
+        is_ready, missing = self._validate_ready_graph(
+            normalized_nodes, normalized_edges
+        )
         chat_reply = self._build_chat_reply_ru(normalized_nodes, normalized_edges)
 
         if not is_ready:
-            await self.dialog_memory.append_and_summarize(str(dialog_id), "user", message)
-            await self.dialog_memory.append_and_summarize(str(dialog_id), "assistant", chat_reply)
+            await self.dialog_memory.append_and_summarize(
+                str(dialog_id), "user", message
+            )
+            await self.dialog_memory.append_and_summarize(
+                str(dialog_id), "assistant", chat_reply
+            )
             return {
                 "status": "cannot_build",
                 "message_ru": "Сценарий не готов к выполнению. Не хватает входных данных.",
@@ -114,7 +163,9 @@ class PipelineService:
         await self.session.commit()
 
         await self.dialog_memory.append_and_summarize(str(dialog_id), "user", message)
-        await self.dialog_memory.append_and_summarize(str(dialog_id), "assistant", chat_reply)
+        await self.dialog_memory.append_and_summarize(
+            str(dialog_id), "assistant", chat_reply
+        )
 
         return {
             "status": "ready",
@@ -183,29 +234,28 @@ class PipelineService:
             f"USER_QUERY:\n{user_query}\n\n"
             f"DIALOG_CONTEXT:\n{json.dumps(context_payload, ensure_ascii=False)}\n\n"
             f"CAPABILITIES:\n{json.dumps(capabilities_payload, ensure_ascii=False)}\n\n"
+            "If you see a recurring sequence of steps or a logically complex operation that can be encapsulated, "
+            "you can define a 'macro' (Composite Capability) in the 'new_macros' field. "
+            "Nodes can then reference these macros by their name or UUID if provided.\n\n"
             "OUTPUT_SCHEMA:\n"
             "{\n"
-            "  \"nodes\": [\n"
+            '  "new_macros": [\n'
             "    {\n"
-            "      \"step\": 1,\n"
-            "      \"name\": \"Step name\",\n"
-            "      \"description\": \"What this step does\",\n"
-            "      \"capability_id\": \"UUID\",\n"
-            "      \"input_connected_from\": [],\n"
-            "      \"output_connected_to\": [],\n"
-            "      \"input_data_type_from_previous\": [],\n"
-            "      \"external_inputs\": [],\n"
-            "      \"endpoints\": []\n"
+            '      "name": "macro_name",\n'
+            '      "description": "Description",\n'
+            '      "input_schema": {}, "output_schema": {},\n'
+            '      "recipe": { "steps": [ { "action_id": "...", "input_map": {} } ] }\n'
             "    }\n"
             "  ],\n"
-            "  \"edges\": [\n"
+            '  "nodes": [\n'
             "    {\n"
-            "      \"from_step\": 1,\n"
-            "      \"to_step\": 2,\n"
-            "      \"type\": \"field_name_or_type\"\n"
+            '      "step": 1,\n'
+            '      "name": "Step name",\n'
+            '      "capability_id": "UUID or macro_name",\n'
+            "      ...\n"
             "    }\n"
             "  ],\n"
-            "  \"variable_injections\": []\n"
+            '  "edges": [...]\n'
             "}\n"
         )
 
@@ -238,13 +288,17 @@ class PipelineService:
                 next_step += 1
             step_map[raw_step] = step
 
-            capability_id = raw_node.get("capability_id")
-            if not capability_id and isinstance(raw_node.get("endpoints"), list):
-                endpoints = raw_node.get("endpoints")
-                if endpoints and isinstance(endpoints[0], dict):
-                    capability_id = endpoints[0].get("capability_id")
+            capability_id_raw = raw_node.get("capability_id")
+            cap = None
+            if capability_id_raw:
+                cap = capabilities_by_id.get(str(capability_id_raw))
+                if not cap:
+                    # Поиск по имени, если это новый макрос
+                    for c in capabilities_by_id.values():
+                        if c.name == capability_id_raw:
+                            cap = c
+                            break
 
-            cap = capabilities_by_id.get(str(capability_id)) if capability_id else None
             if cap is None:
                 endpoints_payload = []
             else:
@@ -253,6 +307,9 @@ class PipelineService:
                         "name": cap.name,
                         "capability_id": str(cap.id),
                         "action_id": str(cap.action_id),
+                        "capability_id": cap.id,
+                        "action_id": cap.action_id,
+                        "type": cap.type,
                         "input_type": cap.input_schema,
                         "output_type": cap.output_schema,
                     }
@@ -261,12 +318,21 @@ class PipelineService:
             normalized_nodes.append(
                 {
                     "step": step,
-                    "name": raw_node.get("name") or (cap.name if cap else f"Шаг {step}"),
+                    "name": raw_node.get("name")
+                    or (cap.name if cap else f"Шаг {step}"),
                     "description": raw_node.get("description"),
-                    "input_connected_from": self._normalize_int_list(raw_node.get("input_connected_from")),
-                    "output_connected_to": self._normalize_int_list(raw_node.get("output_connected_to")),
-                    "input_data_type_from_previous": self._normalize_input_data_types(raw_node.get("input_data_type_from_previous")),
-                    "external_inputs": self._normalize_str_list(raw_node.get("external_inputs")),
+                    "input_connected_from": self._normalize_int_list(
+                        raw_node.get("input_connected_from")
+                    ),
+                    "output_connected_to": self._normalize_int_list(
+                        raw_node.get("output_connected_to")
+                    ),
+                    "input_data_type_from_previous": self._normalize_input_data_types(
+                        raw_node.get("input_data_type_from_previous")
+                    ),
+                    "external_inputs": self._normalize_str_list(
+                        raw_node.get("external_inputs")
+                    ),
                     "endpoints": endpoints_payload,
                 }
             )
@@ -279,8 +345,14 @@ class PipelineService:
         for raw_edge in raw_edges:
             if not isinstance(raw_edge, dict):
                 continue
-            from_step = raw_edge.get("from_step") or raw_edge.get("from") or raw_edge.get("source")
-            to_step = raw_edge.get("to_step") or raw_edge.get("to") or raw_edge.get("target")
+            from_step = (
+                raw_edge.get("from_step")
+                or raw_edge.get("from")
+                or raw_edge.get("source")
+            )
+            to_step = (
+                raw_edge.get("to_step") or raw_edge.get("to") or raw_edge.get("target")
+            )
             edge_type = raw_edge.get("type")
             if from_step in step_map:
                 from_step = step_map[from_step]
@@ -313,7 +385,9 @@ class PipelineService:
                 return
             if self._edge_creates_cycle(edges, from_step, to_step):
                 return
-            edges.append({"from_step": from_step, "to_step": to_step, "type": edge_type})
+            edges.append(
+                {"from_step": from_step, "to_step": to_step, "type": edge_type}
+            )
             existing.add((from_step, to_step, edge_type))
 
         for from_step, from_node in node_by_step.items():
@@ -393,7 +467,9 @@ class PipelineService:
 
         return len(missing) == 0, missing
 
-    def _build_chat_reply_ru(self, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> str:
+    def _build_chat_reply_ru(
+        self, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]
+    ) -> str:
         if not nodes:
             return "Мне не удалось построить шаги выполнения."
 
@@ -425,7 +501,9 @@ class PipelineService:
             return raw.get("type") if isinstance(raw.get("type"), str) else None
         return None
 
-    def _extract_required_inputs(self, input_schema: dict[str, Any] | None) -> list[str]:
+    def _extract_required_inputs(
+        self, input_schema: dict[str, Any] | None
+    ) -> list[str]:
         if not isinstance(input_schema, dict):
             return []
         required = input_schema.get("required")
@@ -438,7 +516,11 @@ class PipelineService:
         if not endpoints:
             return []
         input_type = endpoints[0].get("input_type")
-        return self._extract_required_inputs(input_type) if isinstance(input_type, dict) else []
+        return (
+            self._extract_required_inputs(input_type)
+            if isinstance(input_type, dict)
+            else []
+        )
 
     def _normalize_int_list(self, value: Any) -> list[int]:
         if not isinstance(value, list):
@@ -467,7 +549,9 @@ class PipelineService:
             return []
         return [str(item) for item in value if isinstance(item, (str, int))]
 
-    def _edge_creates_cycle(self, edges: list[dict[str, Any]], from_step: int, to_step: int) -> bool:
+    def _edge_creates_cycle(
+        self, edges: list[dict[str, Any]], from_step: int, to_step: int
+    ) -> bool:
         adjacency: dict[int, set[int]] = {}
         for edge in edges:
             src = edge.get("from_step")
@@ -494,7 +578,9 @@ class PipelineService:
 
         return any(dfs(node) for node in list(adjacency.keys()))
 
-    def _is_linear_chain(self, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> bool:
+    def _is_linear_chain(
+        self, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]
+    ) -> bool:
         if not nodes:
             return False
         if len(nodes) == 1:

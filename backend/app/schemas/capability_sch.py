@@ -19,11 +19,13 @@ class CapabilityDataFormat(BaseModel):
 
 class CapabilityResponse(BaseModel):
     id: UUID
-    action_id: UUID
+    action_id: UUID | None = None
+    type: str = "ATOMIC"
     name: str
     description: str | None = None
     input_schema: dict[str, Any] | None = None
     output_schema: dict[str, Any] | None = None
+    recipe: dict[str, Any] | None = None
     data_format: CapabilityDataFormat | None = None
     created_at: datetime
     updated_at: datetime
@@ -33,7 +35,8 @@ class CapabilityResponse(BaseModel):
 
 class CapabilityIngestItemResponse(BaseModel):
     id: UUID
-    action_id: UUID
+    action_id: UUID | None = None
+    type: str = "ATOMIC"
     name: str
     description: str | None = None
 

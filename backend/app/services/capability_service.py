@@ -16,6 +16,7 @@ class CapabilityService:
 
     @staticmethod
     def build_from_actions(actions: list[Action]) -> list[Capability]:
+        from app.models.capability import CapabilityType
         capabilities: list[Capability] = []
 
         for action in actions:
@@ -23,6 +24,7 @@ class CapabilityService:
             capabilities.append(
                 Capability(
                     action_id=action.id,
+                    type=CapabilityType.ATOMIC,
                     name=capability_payload["name"],
                     description=capability_payload.get("description"),
                     input_schema=capability_payload.get("input_schema"),
@@ -33,6 +35,29 @@ class CapabilityService:
             )
 
         return capabilities
+
+    async def create_composite_capability(
+        self,
+        *,
+        name: str,
+        description: str | None = None,
+        input_schema: dict[str, Any] | None = None,
+        output_schema: dict[str, Any] | None = None,
+        recipe: dict[str, Any],
+    ) -> Capability:
+        from app.models.capability import CapabilityType
+        capability = Capability(
+            type=CapabilityType.COMPOSITE,
+            name=name,
+            description=description,
+            input_schema=input_schema,
+            output_schema=output_schema,
+            recipe=recipe,
+        )
+        self.session.add(capability)
+        await self.session.flush()
+        await self.session.refresh(capability)
+        return capability
 
     async def create_from_actions(
         self,

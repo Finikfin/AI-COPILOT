@@ -1,13 +1,17 @@
-from __future__ import annotations
-
+import enum
 import uuid
 from typing import Any
 
-from sqlalchemy import ForeignKey, Index, String, Text
+from sqlalchemy import Enum, ForeignKey, Index, String, Text
 from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
+
+
+class CapabilityType(str, enum.Enum):
+    ATOMIC = "ATOMIC"
+    COMPOSITE = "COMPOSITE"
 
 
 class Capability(TimestampMixin, Base):
@@ -21,12 +25,20 @@ class Capability(TimestampMixin, Base):
         primary_key=True,
         default=uuid.uuid4,
     )
-    action_id: Mapped[uuid.UUID] = mapped_column(
+    action_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("actions.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
         unique=True,
-        comment="Action, from which this capability was built",
+        comment="Action, from which this capability was built (for ATOMIC)",
+    )
+    type: Mapped[CapabilityType] = mapped_column(
+        Enum(CapabilityType, name="capability_type", native_enum=False),
+        nullable=False,
+        default=CapabilityType.ATOMIC,
+        server_default=CapabilityType.ATOMIC.value,
+        index=True,
+        comment="Type of capability: ATOMIC (single action) or COMPOSITE (multiple actions)",
     )
     name: Mapped[str] = mapped_column(
         String(255),
@@ -48,6 +60,11 @@ class Capability(TimestampMixin, Base):
         JSON,
         nullable=True,
         comment="Public output schema of the capability",
+    )
+    recipe: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON,
+        nullable=True,
+        comment="Internal steps and logic for COMPOSITE capabilities",
     )
     data_format: Mapped[dict[str, Any] | None] = mapped_column(
         JSON,
