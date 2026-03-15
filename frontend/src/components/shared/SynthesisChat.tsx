@@ -79,17 +79,30 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
 
     const hydrateDialog = async () => {
       setIsHydrating(true);
+      let activeDialogId: string | null = null;
+      let shouldLoadHistory = false;
+      const storedDialogId = localStorage.getItem(storageKey);
+      let dialogs: Array<{ dialog_id: string }> = [];
 
-      let activeDialogId = initialDialogId || localStorage.getItem(storageKey) || null;
-      if (!activeDialogId) {
-        try {
-          const dialogs = await listPipelineDialogs(1, 0);
-          activeDialogId = dialogs[0]?.dialog_id || null;
-        } catch (error) {
-          console.error('Unable to load dialogs list:', error);
-        }
+      try {
+        dialogs = await listPipelineDialogs(50, 0);
+      } catch (error) {
+        console.error('Unable to load dialogs list:', error);
       }
-      if (!activeDialogId) {
+
+      if (initialDialogId) {
+        activeDialogId = initialDialogId;
+        shouldLoadHistory = true;
+      } else if (
+        storedDialogId &&
+        dialogs.some((dialog) => dialog.dialog_id === storedDialogId)
+      ) {
+        activeDialogId = storedDialogId;
+        shouldLoadHistory = true;
+      } else if (dialogs.length > 0) {
+        activeDialogId = dialogs[0].dialog_id;
+        shouldLoadHistory = true;
+      } else {
         activeDialogId = generateUUID();
       }
 
@@ -99,6 +112,13 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
 
       setDialogId(activeDialogId);
       localStorage.setItem(storageKey, activeDialogId);
+
+      if (!shouldLoadHistory) {
+        setMessages([{ role: 'assistant', content: DEFAULT_ASSISTANT_MESSAGE }]);
+        setPipeline(null);
+        setIsHydrating(false);
+        return;
+      }
 
       try {
         const history = await getPipelineDialogHistory(activeDialogId, 30, 0);
@@ -138,6 +158,9 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
         }
       } catch (error) {
         if (!cancelled) {
+          const freshDialogId = generateUUID();
+          setDialogId(freshDialogId);
+          localStorage.setItem(storageKey, freshDialogId);
           setMessages([{ role: 'assistant', content: DEFAULT_ASSISTANT_MESSAGE }]);
           setPipeline(null);
         }

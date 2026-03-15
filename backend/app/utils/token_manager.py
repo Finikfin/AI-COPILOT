@@ -52,7 +52,14 @@ async def get_current_user(
     creds: HTTPAuthorizationCredentials | None = Depends(security),
     session: AsyncSession = Depends(get_session),
 ) -> User:
-    if MOCK_AUTH_ENABLED:
+    auth_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+    # In mock mode we still honor a provided token to keep user isolation.
+    if MOCK_AUTH_ENABLED and creds is None:
         mock_user = _build_mock_user()
         existing_user = await session.get(User, mock_user.id)
         if existing_user is not None:
@@ -67,47 +74,54 @@ async def get_current_user(
         return existing_user or mock_user
 
     if creds is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    if jwt is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="JWT support is not installed and MOCK_AUTH is disabled",
-        )
-
-    token = creds.credentials
-    auth_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-
-    try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
-        user_id_str: str = payload.get("sub")
-        if user_id_str is None:
-            raise auth_exception
-        user_id = UUID(user_id_str)
-    except (JWTError, ValueError):
         raise auth_exception
 
-    result = await session.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
-
+    user = await _resolve_user_from_token(token=creds.credentials, session=session)
     if user is None:
         raise auth_exception
 
+    return user
+
+
+async def _resolve_user_from_token(token: str, session: AsyncSession) -> User | None:
+    user_id: UUID | None = None
+    if jwt is not None:
+        try:
+            payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
+            user_id_str: str | None = payload.get("sub")
+            if user_id_str is None:
+                return None
+            user_id = UUID(user_id_str)
+        except (JWTError, ValueError):
+            return None
+    else:
+        user_id = _parse_mock_token(token)
+        if user_id is None:
+            return None
+
+    result = await session.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user is None:
+        return None
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_423_LOCKED,
             detail="User account is deactivated",
         )
-
     return user
+
+
+def _parse_mock_token(token: str) -> UUID | None:
+    if not token.startswith("mock-token-"):
+        return None
+    parts = token.split("-", 3)
+    if len(parts) != 4:
+        return None
+    _, _, _, raw_user_id = parts
+    try:
+        return UUID(raw_user_id)
+    except ValueError:
+        return None
 
 
 def check_permissions(allowed_roles: List[UserRole]):
