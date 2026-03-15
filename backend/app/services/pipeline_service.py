@@ -265,7 +265,7 @@ class PipelineService:
                     "description": raw_node.get("description"),
                     "input_connected_from": self._normalize_int_list(raw_node.get("input_connected_from")),
                     "output_connected_to": self._normalize_int_list(raw_node.get("output_connected_to")),
-                    "input_data_type_from_previous": raw_node.get("input_data_type_from_previous") or [],
+                    "input_data_type_from_previous": self._normalize_input_data_types(raw_node.get("input_data_type_from_previous")),
                     "external_inputs": self._normalize_str_list(raw_node.get("external_inputs")),
                     "endpoints": endpoints_payload,
                 }
@@ -447,6 +447,19 @@ class PipelineService:
         for item in value:
             if isinstance(item, int):
                 result.append(item)
+        return result
+
+    def _normalize_input_data_types(self, value: Any) -> list[dict[str, Any]]:
+        if not isinstance(value, list):
+            return []
+        result = []
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            from_step = item.get("from_step") or item.get("step")
+            edge_type = item.get("type") or item.get("output") or item.get("data_type")
+            if isinstance(from_step, int) and isinstance(edge_type, str):
+                result.append({"from_step": from_step, "type": edge_type})
         return result
 
     def _normalize_str_list(self, value: Any) -> list[str]:
