@@ -20,6 +20,7 @@ const Login: React.FC = () => {
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const { login, register } = useAuth();
+  const { login, register } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -31,6 +32,7 @@ const Login: React.FC = () => {
 
     setIsLoading(true);
     try {
+      // 1. Try to login
       // 1. Try to login
       await login(email, password);
       toast.success("Успешный вход!");
@@ -70,8 +72,10 @@ const Login: React.FC = () => {
             </div>
           </div>
           <CardTitle className="text-2xl font-bold">Вход в систему</CardTitle>
+          <CardTitle className="text-2xl font-bold">Вход в систему</CardTitle>
           <CardDescription>
-            Введите email и пароль для входа или создания аккаунта
+            Введите email и пароль для входа или создания аккаунта Введите email
+            и пароль для входа или создания аккаунта
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -81,6 +85,7 @@ const Login: React.FC = () => {
               <Input
                 id="email"
                 type="email"
+                placeholder="email@example.com"
                 placeholder="email@example.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -97,12 +102,16 @@ const Login: React.FC = () => {
                 id="password"
                 type="password"
                 placeholder="••••••••"
+                placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 disabled={isLoading}
                 required
                 className="bg-background border-border"
               />
+              <p className="text-[10px] text-muted-foreground mt-1">
+                Для новых пользователей: минимум 8 символов, буквы и цифры.
+              </p>
               <p className="text-[10px] text-muted-foreground mt-1">
                 Для новых пользователей: минимум 8 символов, буквы и цифры.
               </p>
