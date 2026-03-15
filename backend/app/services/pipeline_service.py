@@ -251,8 +251,8 @@ class PipelineService:
                 endpoints_payload = [
                     {
                         "name": cap.name,
-                        "capability_id": cap.id,
-                        "action_id": cap.action_id,
+                        "capability_id": str(cap.id),
+                        "action_id": str(cap.action_id),
                         "input_type": cap.input_schema,
                         "output_type": cap.output_schema,
                     }
