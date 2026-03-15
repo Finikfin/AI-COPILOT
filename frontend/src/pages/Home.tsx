@@ -7,11 +7,10 @@ import { ImportResultsModal } from '@/components/shared/ImportResultsModal';
 import { useNavigate } from 'react-router-dom';
 import { Action } from '@/types/action';
 import { useActionsContext } from '@/contexts/ActionContext';
-import { generatePipeline } from '@/api/chat';
 import { generateUUID } from '@/lib/utils';
 
 const Home: React.FC = () => {
-  const { actions, addActions, addCapabilities } = useActionsContext();
+  const { addActions, addCapabilities } = useActionsContext();
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isResultsModalOpen, setIsResultsModalOpen] = useState(false);
   const [importResults, setImportResults] = useState<{ succeeded_actions: Action[], failed_actions: any[] } | null>(null);
@@ -24,14 +23,6 @@ const Home: React.FC = () => {
     if (!chatMessage.trim()) return;
 
     const dialogId = generateUUID();
-
-    // Send message to generate pipeline endpoint
-    await generatePipeline({
-      dialog_id: dialogId,
-      message: chatMessage,
-      user_id: null,
-      capability_ids: null
-    });
 
     // Navigate to pipelines page with the message and dialog state
     navigate('/pipelines', {
