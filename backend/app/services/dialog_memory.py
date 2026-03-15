@@ -4,7 +4,10 @@ import json
 import os
 from typing import Any
 
-from redis import asyncio as aioredis
+try:
+    from redis import asyncio as aioredis
+except ModuleNotFoundError:
+    aioredis = None
 
 from app.utils.ollama_client import chat_json, summarize_dialog_text
 
@@ -54,6 +57,8 @@ class DialogMemoryService:
         await redis.delete(self._messages_key(dialog_id), self._summary_key(dialog_id))
 
     async def _get_redis(self):
+        if aioredis is None:
+            return None
         try:
             redis = aioredis.from_url(self.redis_url, encoding="utf8", decode_responses=True)
             await redis.ping()

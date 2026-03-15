@@ -81,6 +81,9 @@ class PipelineGenerationService:
 
         normalized_nodes, normalized_edges = self._normalize_workflow(raw_graph, selected_capabilities)
         normalized_edges = self._repair_edges_with_data_flow(normalized_nodes, normalized_edges)
+        normalized_edges = self._prune_edges_for_terminal_goal(normalized_nodes, normalized_edges)
+        normalized_edges = self._prune_edges_by_required_inputs(normalized_nodes, normalized_edges)
+        self._sync_node_connections(normalized_nodes, normalized_edges)
         self._ensure_external_inputs(normalized_nodes, normalized_edges)
 
         is_ready, missing = self._validate_ready_graph(normalized_nodes, normalized_edges)
@@ -172,10 +175,40 @@ class PipelineGenerationService:
         }
 
         instruction = (
-            "Сгенерируй граф сценария для запроса пользователя. "
-            "Ответь ТОЛЬКО валидным JSON без текста и markdown. "
-            "Граф — DAG: связи только по данным, не по порядку. "
-            "Если узлу нужно несколько входов — создай несколько связей."
+            "Сгенерируй граф сценария для запроса пользователя.\n"
+            "Ответь ТОЛЬКО валидным JSON без markdown и без пояснений.\n\n"
+            "Работай в 3 внутренних фазах (не показывай их в ответе):\n"
+            "Фаза A — Прямой проход:\n"
+            "- Определи цель пользователя.\n"
+            "- Разложи процесс на шаги: какие данные производит каждый step и какие данные потребляет.\n"
+            "- Построй путь слева направо: источники -> преобразования -> финальный результат.\n\n"
+            "Фаза B — Сборка графа:\n"
+            "- Создай nodes и edges строго по data-flow.\n"
+            "- Для merge-узлов добавь отдельное ребро от каждого источника.\n"
+            "- Заполни input_connected_from/output_connected_to строго по edges.\n\n"
+            "Фаза C — Обратная проверка (с конца в начало):\n"
+            "- Начни с последнего шага и проверь, что каждый его вход имеет источник:\n"
+            "  либо edge из предыдущих шагов, либо external_inputs.\n"
+            "- Рекурсивно пройди все upstream шаги до начальных источников.\n"
+            "- Убери лишние ребра, которые не участвуют в достижении финального шага.\n"
+            "- Проверь, что нет циклов и ссылок на несуществующие step.\n\n"
+            "Критические правила:\n"
+            "1) Граф строго DAG.\n"
+            "2) Связи только по данным, не по порядку.\n"
+            "3) Для каждого edge from_step->to_step:\n"
+            "   - to_step включен в output_connected_to узла from_step\n"
+            "   - from_step включен в input_connected_from узла to_step\n"
+            "4) Не создавай лишних связей.\n"
+            "5) capability_id только из CAPABILITIES.\n\n"
+            "Пример корректного merge-паттерна:\n"
+            "- Step 1 produce users\n"
+            "- Step 2 produce hotels\n"
+            "- Step 3 consumes users and hotels\n"
+            "Тогда обязательно:\n"
+            "- edges: (1->3, type=\"users\"), (2->3, type=\"hotels\")\n"
+            "- node[3].input_connected_from = [1,2]\n"
+            "- node[1].output_connected_to содержит 3\n"
+            "- node[2].output_connected_to содержит 3"
         )
 
         return (
@@ -206,7 +239,11 @@ class PipelineGenerationService:
             "    }\n"
             "  ],\n"
             "  \"variable_injections\": []\n"
-            "}\n"
+            "}\n\n"
+            "SELF-CHECK (INTERNAL ONLY):\n"
+            "- Сначала forward-путь, потом backward-валидация от последнего шага.\n"
+            "- Если есть рассинхрон edges vs node links — исправь до ответа.\n"
+            "- В ответ выводи только итоговый JSON.\n"
         )
 
     def _normalize_workflow(
@@ -329,6 +366,71 @@ class PipelineGenerationService:
 
         return edges
 
+    def _prune_edges_for_terminal_goal(
+        self,
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        known_steps = {
+            step for node in nodes if isinstance((step := node.get("step")), int)
+        }
+        if not known_steps:
+            return edges
+
+        terminal_step = max(known_steps)
+        reverse_adjacency: dict[int, set[int]] = {}
+        for edge in edges:
+            src = edge.get("from_step")
+            dst = edge.get("to_step")
+            if isinstance(src, int) and isinstance(dst, int):
+                reverse_adjacency.setdefault(dst, set()).add(src)
+
+        reachable: set[int] = set()
+        stack: list[int] = [terminal_step]
+        while stack:
+            current = stack.pop()
+            if current in reachable:
+                continue
+            reachable.add(current)
+            stack.extend(reverse_adjacency.get(current, set()))
+
+        return [
+            edge
+            for edge in edges
+            if isinstance(edge.get("from_step"), int)
+            and isinstance(edge.get("to_step"), int)
+            and edge["from_step"] in reachable
+            and edge["to_step"] in reachable
+        ]
+
+    def _prune_edges_by_required_inputs(
+        self,
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        required_by_step: dict[int, set[str]] = {}
+        for node in nodes:
+            step = node.get("step")
+            if not isinstance(step, int):
+                continue
+            required_inputs = self._extract_required_inputs_from_node(node)
+            if required_inputs:
+                required_by_step[step] = set(required_inputs)
+
+        filtered: list[dict[str, Any]] = []
+        for edge in edges:
+            to_step = edge.get("to_step")
+            edge_type = edge.get("type")
+            if not isinstance(to_step, int):
+                continue
+            required_inputs = required_by_step.get(to_step)
+            if required_inputs is None:
+                filtered.append(edge)
+                continue
+            if isinstance(edge_type, str) and edge_type in required_inputs:
+                filtered.append(edge)
+        return filtered
+
     def _ensure_external_inputs(
         self,
         nodes: list[dict[str, Any]],
@@ -353,6 +455,40 @@ class PipelineGenerationService:
                     continue
                 external_inputs.add(required_input)
             node["external_inputs"] = sorted(external_inputs)
+
+    def _sync_node_connections(
+        self,
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+    ) -> None:
+        incoming_by_step: dict[int, set[int]] = {}
+        outgoing_by_step: dict[int, set[int]] = {}
+        known_steps = {
+            step for node in nodes if isinstance((step := node.get("step")), int)
+        }
+
+        for step in known_steps:
+            incoming_by_step[step] = set()
+            outgoing_by_step[step] = set()
+
+        for edge in edges:
+            src = edge.get("from_step")
+            dst = edge.get("to_step")
+            if not isinstance(src, int) or not isinstance(dst, int):
+                continue
+            if src not in known_steps or dst not in known_steps:
+                continue
+            outgoing_by_step[src].add(dst)
+            incoming_by_step[dst].add(src)
+
+        for node in nodes:
+            step = node.get("step")
+            if not isinstance(step, int):
+                node["input_connected_from"] = []
+                node["output_connected_to"] = []
+                continue
+            node["input_connected_from"] = sorted(incoming_by_step.get(step, set()))
+            node["output_connected_to"] = sorted(outgoing_by_step.get(step, set()))
 
     def _validate_ready_graph(
         self,
