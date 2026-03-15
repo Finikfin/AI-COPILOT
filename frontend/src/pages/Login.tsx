@@ -54,7 +54,6 @@ const Login: React.FC = () => {
             </div>
           </div>
           <CardTitle className="text-2xl font-bold">Вход в систему</CardTitle>
-          <CardTitle className="text-2xl font-bold">Вход в систему</CardTitle>
           <CardDescription>
             Если email новый, аккаунт создастся автоматически. Если email уже
             существует, войти можно только с правильным паролем.
