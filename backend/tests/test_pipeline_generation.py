@@ -267,6 +267,90 @@ def test_generate_returns_needs_input_on_low_confidence_selection():
     assert "selection:low_confidence" in result["missing_requirements"]
 
 
+def test_generate_after_clarification_does_not_loop_on_low_confidence():
+    service = _build_service()
+    capability = _build_capability()
+    selected = [
+        SelectedCapability(capability=capability, score=0.2, confidence_tier="low")
+    ]
+    asked_question = service._build_low_confidence_question_ru()
+    graph_called = {"value": False}
+
+    service.dialog_memory.get_context = AsyncMock(
+        return_value=(
+            [{"role": "assistant", "content": asked_question}],
+            "ctx summary",
+        )
+    )
+    service.dialog_memory.append_and_summarize = AsyncMock()
+    service.semantic_selector.select_capabilities = AsyncMock(return_value=selected)
+
+    def fake_generate_raw_graph(*_args, **_kwargs):
+        graph_called["value"] = True
+        return {
+            "nodes": [
+                {
+                    "step": 1,
+                    "name": "Fetch users",
+                    "capability_id": str(capability.id),
+                }
+            ],
+            "edges": [],
+        }
+
+    service.generate_raw_graph = fake_generate_raw_graph
+
+    result = asyncio.run(
+        service.generate(
+            dialog_id=uuid4(),
+            message="Нужен финальный результат: сегмент для email-рассылки",
+            user_id=uuid4(),
+        )
+    )
+
+    assert graph_called["value"] is True
+    assert result["status"] != "needs_input"
+
+
+def test_generate_short_explicit_outcome_bypasses_low_confidence_question():
+    service = _build_service()
+    capability = _build_capability()
+    selected = [
+        SelectedCapability(capability=capability, score=0.2, confidence_tier="low")
+    ]
+    graph_called = {"value": False}
+
+    service.dialog_memory.get_context = AsyncMock(return_value=([], "ctx summary"))
+    service.dialog_memory.append_and_summarize = AsyncMock()
+    service.semantic_selector.select_capabilities = AsyncMock(return_value=selected)
+
+    def fake_generate_raw_graph(*_args, **_kwargs):
+        graph_called["value"] = True
+        return {
+            "nodes": [
+                {
+                    "step": 1,
+                    "name": "Fetch users",
+                    "capability_id": str(capability.id),
+                }
+            ],
+            "edges": [],
+        }
+
+    service.generate_raw_graph = fake_generate_raw_graph
+
+    result = asyncio.run(
+        service.generate(
+            dialog_id=uuid4(),
+            message="Сегмент",
+            user_id=uuid4(),
+        )
+    )
+
+    assert graph_called["value"] is True
+    assert result["status"] != "needs_input"
+
+
 def test_normalize_workflow_marks_invalid_capability_reference():
     service = _build_service()
     capability = _build_capability()

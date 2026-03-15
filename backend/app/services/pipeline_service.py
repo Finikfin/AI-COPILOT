@@ -91,7 +91,12 @@ class PipelineService:
                 "context_summary": dialog_summary,
             }
 
-        if self._selection_is_low_confidence(selected_capabilities):
+        if self._selection_is_low_confidence(
+            selected_capabilities
+        ) and self._should_request_low_confidence_clarification(
+            dialog_messages=dialog_messages,
+            user_message=message,
+        ):
             question = self._build_low_confidence_question_ru()
             await self.dialog_memory.append_and_summarize(str(dialog_id), "user", message)
             await self.dialog_memory.append_and_summarize(str(dialog_id), "assistant", question)
@@ -337,6 +342,55 @@ class PipelineService:
             "Какой финальный бизнес-результат нужен: сегмент, рассылка, "
             "обновление CRM или отчёт?"
         )
+
+    def _should_request_low_confidence_clarification(
+        self,
+        dialog_messages: list[dict[str, Any]],
+        user_message: str,
+    ) -> bool:
+        if self._has_explicit_business_outcome(user_message):
+            return False
+
+        # Ask clarifying question only once per dialog to avoid loops:
+        # after the first clarification attempt, proceed to graph generation.
+        marker = "какой финальный бизнес-результат нужен"
+        for item in reversed(dialog_messages):
+            if not isinstance(item, dict):
+                continue
+            role = str(item.get("role", "")).lower()
+            if role != "assistant":
+                continue
+            content = str(item.get("content", "")).lower()
+            if marker in content:
+                return False
+        return True
+
+    def _has_explicit_business_outcome(self, message: str) -> bool:
+        normalized = str(message or "").strip().lower()
+        if not normalized:
+            return False
+
+        outcome_markers = (
+            "сегмент",
+            "рассыл",
+            "обновлен",
+            "crm",
+            "отч",
+            "segment",
+            "newsletter",
+            "report",
+        )
+        has_outcome_marker = any(marker in normalized for marker in outcome_markers)
+        if not has_outcome_marker:
+            return False
+
+        intent_markers = ("финаль", "результат", "цель", "итог", "outcome", "goal")
+        has_intent_marker = any(marker in normalized for marker in intent_markers)
+        if has_intent_marker:
+            return True
+
+        # Short answer after clarification like "сегмент" or "рассылка".
+        return len(self._tokenize_text(normalized)) <= 3
 
     def _normalize_workflow(
         self,
