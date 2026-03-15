@@ -55,15 +55,6 @@ export const Header: React.FC<HeaderProps> = ({ onToggleSidebar }) => {
         </div>
 
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="sm" className="relative">
-            <Bell className="h-5 w-5" />
-            {notifications > 0 && (
-              <Badge className="absolute -top-1 -right-1 px-1 min-w-5 h-5 text-xs bg-red-500">
-                {notifications}
-              </Badge>
-            )}
-          </Button>
-
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" className="flex items-center gap-2">
