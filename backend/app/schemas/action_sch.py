@@ -11,6 +11,7 @@ from app.models import ActionIngestStatus, HttpMethod
 
 class ActionListItemResponse(BaseModel):
     id: UUID
+    user_id: UUID | None = None
     operation_id: str | None = None
     method: HttpMethod
     path: str
@@ -29,6 +30,7 @@ class ActionListItemResponse(BaseModel):
 
 class ActionIngestItemResponse(BaseModel):
     id: UUID
+    user_id: UUID | None = None
     operation_id: str | None = None
     method: HttpMethod
     path: str

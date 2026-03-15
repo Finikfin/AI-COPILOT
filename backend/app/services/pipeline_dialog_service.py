@@ -55,6 +55,14 @@ class PipelineDialogService:
         messages_desc = list(result.scalars().all())
         return dialog, list(reversed(messages_desc))
 
+    async def get_dialog(
+        self,
+        *,
+        dialog_id: UUID,
+        user_id: UUID,
+    ) -> PipelineDialog:
+        return await self._get_dialog_owned_by_user(dialog_id=dialog_id, user_id=user_id)
+
     async def append_user_message(
         self,
         *,
@@ -128,8 +136,10 @@ class PipelineDialogService:
             status = assistant_payload.get("status")
             if isinstance(status, str):
                 dialog.last_status = status
-            if "pipeline_id" in assistant_payload:
-                dialog.last_pipeline_id = self._parse_uuid(assistant_payload.get("pipeline_id"))
+            pipeline_id = self._parse_uuid(assistant_payload.get("pipeline_id"))
+            if pipeline_id is not None:
+                # Preserve the last valid graph reference for non-ready statuses.
+                dialog.last_pipeline_id = pipeline_id
 
         await self.session.commit()
         return message

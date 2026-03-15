@@ -4,10 +4,11 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database.session import get_session
-from app.models import Action, ActionIngestStatus
+from app.models import Action, ActionIngestStatus, User
 from app.schemas.capability_sch import ActionIngestWithCapabilitiesResponse
 from app.services.capability_service import CapabilityService
 from app.services.openapi_service import OpenAPIService
+from app.utils.token_manager import get_current_user
 
 
 router = APIRouter(tags=["Actions"])
@@ -17,6 +18,7 @@ router = APIRouter(tags=["Actions"])
 async def ingest_actions(
     file: UploadFile = File(...),
     session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     payload = await file.read()
     try:
@@ -29,7 +31,7 @@ async def ingest_actions(
     if not action_payloads:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No supported HTTP operations found in OpenAPI file")
 
-    actions = [Action(**action_payload) for action_payload in action_payloads]
+    actions = [Action(user_id=current_user.id, **action_payload) for action_payload in action_payloads]
     session.add_all(actions)
     await session.flush()
 
@@ -37,7 +39,11 @@ async def ingest_actions(
     failed_actions = [action for action in actions if action.ingest_status == ActionIngestStatus.FAILED]
 
     capability_service = CapabilityService(session)
-    capabilities = await capability_service.create_from_actions(succeeded_actions, refresh=False)
+    capabilities = await capability_service.create_from_actions(
+        succeeded_actions,
+        owner_user_id=current_user.id,
+        refresh=False,
+    )
     await session.commit()
 
     for action in actions:

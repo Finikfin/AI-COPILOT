@@ -39,6 +39,7 @@ class PipelineService:
         message: str,
         user_id: UUID | None = None,
         capability_ids: list[UUID] | None = None,
+        previous_pipeline_id: UUID | None = None,
     ) -> dict[str, Any]:
         if self._is_low_quality_message(message):
             return {
@@ -55,8 +56,19 @@ class PipelineService:
 
         if capability_ids:
             capabilities = await self.capability_service.get_capabilities(
-                capability_ids=capability_ids
+                capability_ids=capability_ids,
+                owner_user_id=user_id,
+                include_all=False,
             )
+            if len(capabilities) != len(set(capability_ids)):
+                return {
+                    "status": "needs_input",
+                    "message_ru": "Часть выбранных capabilities недоступна для этого пользователя.",
+                    "chat_reply_ru": "Некоторые capabilities вам не принадлежат или были удалены. Выберите доступные.",
+                    "nodes": [],
+                    "edges": [],
+                    "context_summary": None,
+                }
             selected_capabilities = [
                 SelectedCapability(capability=c, score=1.0) for c in capabilities
             ]
@@ -64,8 +76,29 @@ class PipelineService:
             selected_capabilities = await self.semantic_selector.select_capabilities(
                 self.session,
                 message,
+                owner_user_id=user_id,
                 limit=10,
             )
+
+        previous_pipeline: Pipeline | None = None
+        previous_nodes: list[dict[str, Any]] = []
+        previous_edges: list[dict[str, Any]] = []
+        if previous_pipeline_id is not None:
+            candidate = await self.session.get(Pipeline, previous_pipeline_id)
+            if candidate is not None and (
+                user_id is None or candidate.created_by in (None, user_id)
+            ):
+                previous_pipeline = candidate
+                previous_nodes = (
+                    candidate.nodes
+                    if isinstance(candidate.nodes, list)
+                    else []
+                )
+                previous_edges = (
+                    candidate.edges
+                    if isinstance(candidate.edges, list)
+                    else []
+                )
 
         if not selected_capabilities:
             return {
@@ -85,6 +118,8 @@ class PipelineService:
             selected_capabilities=selected_capabilities,
             dialog_messages=dialog_messages,
             dialog_summary=dialog_summary,
+            previous_nodes=previous_nodes,
+            previous_edges=previous_edges,
         )
 
         try:
@@ -139,16 +174,27 @@ class PipelineService:
                 "context_summary": dialog_summary,
             }
 
-        pipeline = Pipeline(
-            name=self._build_pipeline_name(message),
-            description=None,
-            user_prompt=message,
-            nodes=normalized_nodes,
-            edges=normalized_edges,
-            status=PipelineStatus.READY,
-            created_by=user_id,
-        )
-        self.session.add(pipeline)
+        if previous_pipeline is not None:
+            previous_pipeline.name = self._build_pipeline_name(message)
+            previous_pipeline.description = None
+            previous_pipeline.user_prompt = message
+            previous_pipeline.nodes = normalized_nodes
+            previous_pipeline.edges = normalized_edges
+            previous_pipeline.status = PipelineStatus.READY
+            if previous_pipeline.created_by is None:
+                previous_pipeline.created_by = user_id
+            pipeline = previous_pipeline
+        else:
+            pipeline = Pipeline(
+                name=self._build_pipeline_name(message),
+                description=None,
+                user_prompt=message,
+                nodes=normalized_nodes,
+                edges=normalized_edges,
+                status=PipelineStatus.READY,
+                created_by=user_id,
+            )
+            self.session.add(pipeline)
         await self.session.flush()
         await self.session.refresh(pipeline)
         await self.session.commit()
@@ -191,6 +237,8 @@ class PipelineService:
         selected_capabilities: list[SelectedCapability],
         dialog_messages: list[dict[str, Any]],
         dialog_summary: str | None,
+        previous_nodes: list[dict[str, Any]],
+        previous_edges: list[dict[str, Any]],
     ) -> str:
         capabilities_payload = []
         for sc in selected_capabilities:
@@ -211,9 +259,15 @@ class PipelineService:
         context_payload = {
             "summary": dialog_summary,
             "recent_messages": dialog_messages[-6:],
+            "previous_graph": {
+                "nodes": previous_nodes,
+                "edges": previous_edges,
+            },
         }
 
         instruction = (
+            "If PREVIOUS_GRAPH has nodes, modify that graph instead of creating a brand new one.\n"
+            "Preserve unchanged steps and connections unless explicitly requested.\n\n"
             "Сгенерируй граф сценария для запроса пользователя.\n"
             "Ответь ТОЛЬКО валидным JSON без markdown и без пояснений.\n\n"
             "Работай в 3 внутренних фазах (не показывай их в ответе):\n"
@@ -1101,3 +1155,4 @@ class PipelineService:
                 return False
 
         return True
+

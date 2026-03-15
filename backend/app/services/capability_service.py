@@ -15,14 +15,19 @@ class CapabilityService:
         self.session = session
 
     @staticmethod
-    def build_from_actions(actions: list[Action]) -> list[Capability]:
+    def build_from_actions(
+        actions: list[Action],
+        *,
+        owner_user_id: UUID,
+    ) -> list[Capability]:
         from app.models.capability import CapabilityType
-        capabilities: list[Capability] = []
 
+        capabilities: list[Capability] = []
         for action in actions:
             capability_payload = CapabilityService._build_capability_payload(action)
             capabilities.append(
                 Capability(
+                    user_id=owner_user_id,
                     action_id=action.id,
                     type=CapabilityType.ATOMIC,
                     name=capability_payload["name"],
@@ -39,6 +44,7 @@ class CapabilityService:
     async def create_composite_capability(
         self,
         *,
+        owner_user_id: UUID,
         name: str,
         description: str | None = None,
         input_schema: dict[str, Any] | None = None,
@@ -46,7 +52,9 @@ class CapabilityService:
         recipe: dict[str, Any],
     ) -> Capability:
         from app.models.capability import CapabilityType
+
         capability = Capability(
+            user_id=owner_user_id,
             type=CapabilityType.COMPOSITE,
             name=name,
             description=description,
@@ -63,9 +71,10 @@ class CapabilityService:
         self,
         actions: list[Action],
         *,
+        owner_user_id: UUID,
         refresh: bool = True,
     ) -> list[Capability]:
-        capabilities = self.build_from_actions(actions)
+        capabilities = self.build_from_actions(actions, owner_user_id=owner_user_id)
         if not capabilities:
             return []
 
@@ -83,10 +92,15 @@ class CapabilityService:
         *,
         capability_ids: list[UUID] | None = None,
         action_ids: list[UUID] | None = None,
+        owner_user_id: UUID | None = None,
+        include_all: bool = False,
         limit: int | None = None,
         offset: int = 0,
     ) -> list[Capability]:
         query = select(Capability).order_by(Capability.created_at.asc())
+
+        if not include_all and owner_user_id is not None:
+            query = query.where(Capability.user_id == owner_user_id)
 
         if capability_ids:
             query = query.where(Capability.id.in_(capability_ids))
@@ -103,8 +117,18 @@ class CapabilityService:
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
-    async def get_capability(self, capability_id: UUID) -> Capability | None:
-        return await self.session.get(Capability, capability_id)
+    async def get_capability(
+        self,
+        capability_id: UUID,
+        *,
+        owner_user_id: UUID | None = None,
+        include_all: bool = False,
+    ) -> Capability | None:
+        query = select(Capability).where(Capability.id == capability_id)
+        if not include_all and owner_user_id is not None:
+            query = query.where(Capability.user_id == owner_user_id)
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
 
     @staticmethod
     def _build_capability_payload(action: Action) -> dict[str, Any]:
@@ -138,7 +162,12 @@ class CapabilityService:
         summary = getattr(action, "summary", None)
         description = getattr(action, "description", None)
         operation_id = getattr(action, "operation_id", None)
-        return str(summary or description or operation_id or CapabilityService._build_capability_name(action))
+        return str(
+            summary
+            or description
+            or operation_id
+            or CapabilityService._build_capability_name(action)
+        )
 
     @staticmethod
     def _build_input_schema(action: Action) -> dict[str, Any] | None:
@@ -176,13 +205,30 @@ class CapabilityService:
                     if isinstance(location, str) and location not in parameter_locations:
                         parameter_locations.append(location)
 
-        request_content_type = request_body_schema.get("x-content-type") if isinstance(request_body_schema, dict) else None
-        response_content_type = response_schema.get("x-content-type") if isinstance(response_schema, dict) else None
+        request_content_type = (
+            request_body_schema.get("x-content-type")
+            if isinstance(request_body_schema, dict)
+            else None
+        )
+        response_content_type = (
+            response_schema.get("x-content-type")
+            if isinstance(response_schema, dict)
+            else None
+        )
 
         return {
             "parameter_locations": parameter_locations,
-            "request_content_types": [request_content_type] if isinstance(request_content_type, str) else [],
-            "request_schema_type": request_body_schema.get("type") if isinstance(request_body_schema, dict) else None,
-            "response_content_types": [response_content_type] if isinstance(response_content_type, str) else [],
-            "response_schema_types": [response_schema.get("type")] if isinstance(response_schema, dict) and isinstance(response_schema.get("type"), str) else [],
+            "request_content_types": [request_content_type]
+            if isinstance(request_content_type, str)
+            else [],
+            "request_schema_type": request_body_schema.get("type")
+            if isinstance(request_body_schema, dict)
+            else None,
+            "response_content_types": [response_content_type]
+            if isinstance(response_content_type, str)
+            else [],
+            "response_schema_types": [response_schema.get("type")]
+            if isinstance(response_schema, dict)
+            and isinstance(response_schema.get("type"), str)
+            else [],
         }

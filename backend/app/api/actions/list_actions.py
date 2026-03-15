@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database.session import get_session
-from app.models import Action, ActionIngestStatus, HttpMethod
+from app.models import Action, ActionIngestStatus, HttpMethod, User, UserRole
 from app.schemas.action_sch import ActionListItemResponse
+from app.utils.token_manager import get_current_user
 
 
 router = APIRouter(tags=["Actions"])
@@ -15,11 +18,13 @@ router = APIRouter(tags=["Actions"])
 @router.get("/", response_model=list[ActionListItemResponse])
 async def list_actions(
     method: HttpMethod | None = Query(default=None),
+    owner_id: UUID | None = Query(default=None),
     source_filename: str | None = Query(default=None),
     search: str | None = Query(default=None, min_length=1),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     query = (
         select(Action)
@@ -29,6 +34,12 @@ async def list_actions(
         .limit(limit)
         .offset(offset)
     )
+
+    if current_user.role == UserRole.ADMIN:
+        if owner_id is not None:
+            query = query.where(Action.user_id == owner_id)
+    else:
+        query = query.where(Action.user_id == current_user.id)
 
     if method is not None:
         query = query.where(Action.method == method)

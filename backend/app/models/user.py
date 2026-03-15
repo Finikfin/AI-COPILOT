@@ -35,3 +35,5 @@ class User(TimestampMixin, Base):
         passive_deletes=True,
         lazy="selectin",
     )
+    actions = relationship("Action", passive_deletes=True, lazy="selectin")
+    capabilities = relationship("Capability", passive_deletes=True, lazy="selectin")

@@ -19,6 +19,7 @@ class CapabilityDataFormat(BaseModel):
 
 class CapabilityResponse(BaseModel):
     id: UUID
+    user_id: UUID | None = None
     action_id: UUID | None = None
     type: str = "ATOMIC"
     name: str
@@ -35,6 +36,7 @@ class CapabilityResponse(BaseModel):
 
 class CapabilityIngestItemResponse(BaseModel):
     id: UUID
+    user_id: UUID | None = None
     action_id: UUID | None = None
     type: str = "ATOMIC"
     name: str
