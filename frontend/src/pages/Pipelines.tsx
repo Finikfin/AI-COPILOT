@@ -4,8 +4,9 @@ import { SynthesisChat } from '@/components/shared/SynthesisChat';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Activity, Play, Sparkles } from 'lucide-react';
+import { Activity, Play, Sparkles, ChevronDown, ChevronUp } from 'lucide-react';
 import { usePipelineContext } from '@/contexts/PipelineContext';
+import { motion, AnimatePresence } from 'framer-motion';
 import { PipelineData, PipelineEdge, PipelineNode } from '@/types/pipeline';
 import { cn } from '@/lib/utils';
 
@@ -23,9 +24,9 @@ type DrawableEdge = {
 };
 
 const CARD_WIDTH = 256;
-const CARD_HEIGHT = 220;
+const CARD_HEIGHT = 90; // Significantly smaller base height
 const COLUMN_GAP = 120;
-const ROW_GAP = 72;
+const ROW_GAP = 64;
 const PADDING_X = 48;
 const PADDING_Y = 32;
 
@@ -150,6 +151,8 @@ const buildGraphLayout = (pipeline: PipelineData) => {
 export const Pipelines: React.FC = () => {
   const location = useLocation();
   const { currentPipeline } = usePipelineContext();
+  const [expandedStep, setExpandedStep] = React.useState<number | null>(null);
+  
   const initialMessage = location.state?.initialMessage;
   const dialogId = location.state?.dialogId;
   const graphLayout = currentPipeline && currentPipeline.nodes.length > 0
@@ -207,66 +210,106 @@ export const Pipelines: React.FC = () => {
 
               {graphLayout.positionedNodes.map(({ node, x, y }) => {
                 const endpoint = node.endpoints[0];
+                const isExpanded = expandedStep === node.step;
+
                 return (
-                  <Card
+                  <motion.div
                     key={node.step}
-                    className="absolute z-10 border-primary/20 bg-card/95 shadow-lg"
+                    layout
+                    initial={false}
+                    animate={{ 
+                      height: isExpanded ? 'auto' : CARD_HEIGHT,
+                      zIndex: isExpanded ? 50 : 10
+                    }}
+                    className={cn(
+                      "absolute border border-primary/20 bg-card/95 shadow-lg rounded-xl overflow-hidden cursor-pointer transition-colors hover:border-primary/40",
+                      isExpanded ? "shadow-2xl ring-1 ring-primary/10" : "shadow-md"
+                    )}
                     style={{
                       width: CARD_WIDTH,
-                      minHeight: CARD_HEIGHT,
                       left: x,
                       top: y,
                     }}
+                    onClick={() => setExpandedStep(isExpanded ? null : node.step)}
                   >
-                    <div className="flex h-full flex-col gap-4 p-5">
+                    <div className="p-4 flex flex-col h-full">
+                      {/* Condensed Header */}
                       <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary/70">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-primary/60">
                             Step {node.step}
                           </p>
-                          <h3 className="mt-1 text-base font-semibold text-foreground">{node.name}</h3>
+                          <h3 className={cn(
+                            "mt-0.5 font-semibold text-foreground truncate transition-all",
+                            isExpanded ? "text-base" : "text-sm"
+                          )}>
+                            {node.name}
+                          </h3>
                         </div>
-                        <Badge variant="outline" className="bg-primary/10 text-primary border-primary/20">
-                          API
-                        </Badge>
-                      </div>
-
-                      <p className="text-sm leading-6 text-muted-foreground">
-                        {node.description || 'Описание шага не указано.'}
-                      </p>
-
-                      <div className="space-y-2 text-xs text-muted-foreground">
-                        <div>
-                          <span className="font-semibold text-foreground">Capability:</span>{' '}
-                          {endpoint?.name || 'Не определено'}
-                        </div>
-                        <div>
-                          <span className="font-semibold text-foreground">Inputs:</span>{' '}
-                          {node.input_connected_from.length > 0 ? `from ${node.input_connected_from.join(', ')}` : 'external'}
-                        </div>
-                        <div>
-                          <span className="font-semibold text-foreground">Outputs:</span>{' '}
-                          {node.output_connected_to.length > 0 ? node.output_connected_to.join(', ') : 'terminal'}
-                        </div>
-                      </div>
-
-                      {node.external_inputs.length > 0 && (
-                        <div className="flex flex-wrap gap-2">
-                          {node.external_inputs.map((inputName) => (
-                            <Badge
-                              key={inputName}
-                              variant="outline"
-                              className={cn(
-                                "border-amber-500/30 bg-amber-500/10 text-amber-700"
-                              )}
-                            >
-                              {inputName}
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          {!isExpanded && (
+                            <Badge variant="outline" className="px-1.5 py-0 text-[10px] bg-primary/5 text-primary border-primary/20">
+                              API
                             </Badge>
-                          ))}
+                          )}
+                          {isExpanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
                         </div>
-                      )}
+                      </div>
+
+                      {/* Expandable Content */}
+                      <AnimatePresence>
+                        {isExpanded && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: 'auto' }}
+                            exit={{ opacity: 0, height: 0 }}
+                            transition={{ duration: 0.2 }}
+                            className="mt-4 space-y-4 pt-4 border-t border-border"
+                          >
+                            <p className="text-sm leading-relaxed text-muted-foreground">
+                              {node.description || 'Описание шага не указано.'}
+                            </p>
+
+                            <div className="space-y-2 text-xs text-muted-foreground">
+                              <div className="flex justify-between">
+                                <span className="font-semibold text-foreground">Capability:</span>
+                                <span className="text-right">{endpoint?.name || 'Не определено'}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="font-semibold text-foreground">Inputs:</span>
+                                <span className="text-right">
+                                  {node.input_connected_from.length > 0 ? `Step ${node.input_connected_from.join(', ')}` : 'External'}
+                                </span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="font-semibold text-foreground">Outputs:</span>
+                                <span className="text-right">
+                                  {node.output_connected_to.length > 0 ? `Step ${node.output_connected_to.join(', ')}` : 'Terminal'}
+                                </span>
+                              </div>
+                            </div>
+
+                            {node.external_inputs.length > 0 && (
+                              <div className="pt-2">
+                                <p className="text-[10px] font-semibold text-foreground mb-2 uppercase tracking-wider">Required Params:</p>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {node.external_inputs.map((inputName) => (
+                                    <Badge
+                                      key={inputName}
+                                      variant="outline"
+                                      className="text-[10px] py-0 border-amber-500/30 bg-amber-500/5 text-amber-700"
+                                    >
+                                      {inputName}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
                     </div>
-                  </Card>
+                  </motion.div>
                 );
               })}
             </div>
