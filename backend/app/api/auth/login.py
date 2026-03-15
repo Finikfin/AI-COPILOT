@@ -1,6 +1,6 @@
 from fastapi import APIRouter, status
 
-router = APIRouter(prefix="/auth", tags=["Auth"])
+router = APIRouter(prefix="/v1/auth", tags=["Auth"])
 
 
 @router.post("/login", status_code=status.HTTP_200_OK)

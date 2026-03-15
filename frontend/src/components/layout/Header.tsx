@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Bell, User, Settings, Menu, X } from 'lucide-react';
+import { Bell, User, Settings, Menu, X, LogOut } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import {
@@ -17,7 +17,7 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({ onToggleSidebar }) => {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const [notifications] = useState(3);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const navigate = useNavigate();
@@ -99,6 +99,14 @@ export const Header: React.FC<HeaderProps> = ({ onToggleSidebar }) => {
               >
                 <Settings className="mr-2 h-4 w-4" />
                 Настройки
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem 
+                className="cursor-pointer text-red-500 focus:text-red-500"
+                onClick={logout}
+              >
+                <LogOut className="mr-2 h-4 w-4" />
+                Выйти
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -206,7 +214,7 @@ export const Header: React.FC<HeaderProps> = ({ onToggleSidebar }) => {
 // }
 
 // export const Header: React.FC<HeaderProps> = ({ onToggleSidebar }) => {
-//   const { user } = useAuth();
+//   const { user, logout } = useAuth();
 //   const [notifications] = useState(3);
 
 //   return (

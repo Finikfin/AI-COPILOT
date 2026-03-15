@@ -1,4 +1,5 @@
 import { ENDPOINTS } from '@/constants/api';
+import { apiRequest } from '@/lib/api';
 
 export interface GeneratePipelineRequest {
   dialog_id: string;
@@ -19,17 +20,8 @@ export interface GeneratePipelineResponse {
 }
 
 export const generatePipeline = async (request: GeneratePipelineRequest): Promise<GeneratePipelineResponse> => {
-  const response = await fetch(ENDPOINTS.PIPELINES.GENERATE, {
+  return apiRequest<GeneratePipelineResponse>(ENDPOINTS.PIPELINES.GENERATE, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
     body: JSON.stringify(request),
   });
-
-  if (!response.ok) {
-    throw new Error('Failed to generate pipeline');
-  }
-
-  return response.json();
 };
