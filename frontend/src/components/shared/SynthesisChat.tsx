@@ -1,10 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { 
-  Send, 
-  Sparkles, 
-  User, 
-  Bot, 
-  RotateCcw, 
+import {
+  Send,
+  Sparkles,
+  User,
+  Bot,
+  RotateCcw,
   CheckCircle2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -13,6 +13,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { cn, generateUUID } from '@/lib/utils';
 import { generatePipeline } from '@/api/chat';
+import { usePipelineContext } from '@/contexts/PipelineContext';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -27,16 +28,16 @@ interface SynthesisChatProps {
   initialDialogId?: string;
 }
 
-export const SynthesisChat: React.FC<SynthesisChatProps> = ({ 
-  onSynthesize, 
-  className, 
+export const SynthesisChat: React.FC<SynthesisChatProps> = ({
+  onSynthesize,
+  className,
   initialMessage,
-  initialDialogId 
+  initialDialogId
 }) => {
   const [messages, setMessages] = useState<Message[]>([
-    { 
-      role: 'assistant', 
-      content: 'Привет! Я помогу собрать Pipeline. Опишите бизнес-задачу, которую хотите автоматизировать.' 
+    {
+      role: 'assistant',
+      content: 'Привет! Я помогу собрать Pipeline. Опишите бизнес-задачу, которую хотите автоматизировать.'
     }
   ]);
   const [inputValue, setInputValue] = useState('');
@@ -56,56 +57,61 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
     }
   }, [initialMessage]);
 
+  const { setPipeline } = usePipelineContext();
+  const [isTyping, setIsTyping] = useState(false);
+
   const handleSend = async (overrideValue?: string) => {
     const valueToSend = overrideValue || inputValue;
-    if (!valueToSend.trim()) return;
+    if (!valueToSend.trim() || isTyping) return;
 
     const userMessage = valueToSend;
     setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
     setInputValue('');
+    setIsTyping(true);
 
-    // Pre-add assistant message with loading state
-    setMessages(prev => [...prev, { 
-      role: 'assistant', 
-      content: 'Анализирую возможности...',
-      isGenerating: true 
+    // Initial bot reaction
+    setMessages(prev => [...prev, {
+      role: 'assistant',
+      content: 'Анализирую возможности... Подбираю нужные Capabilities.',
+      isGenerating: true
     }]);
 
     try {
-      // Send message to generate pipeline endpoint
-      const response = await generatePipeline({
+      const data = await generatePipeline({
         dialog_id: dialogId,
         message: userMessage,
         user_id: null,
         capability_ids: null
       });
 
+      // Update Pipeline Global State
+      if (data.status === 'ready' || data.status === 'success' as any) {
+        setPipeline(data as any);
+      }
+
       setMessages(prev => {
         const newMessages = [...prev];
         const lastIndex = newMessages.length - 1;
-        newMessages[lastIndex] = { 
-          role: 'assistant', 
-          content: response.message_ru || (response.status === 'success' ? 'Я подготовил Pipeline для вашей задачи.' : 'Произошла ошибка при генерации.'),
-          isGenerating: false 
+        newMessages[lastIndex] = {
+          role: 'assistant',
+          content: data.chat_reply_ru || data.message_ru || 'Пайплайн успешно собран. Посмотрите на схему по центру.'
         };
         return newMessages;
       });
 
-      if (response.status === 'success' && onSynthesize) {
-        onSynthesize(userMessage);
-      }
+      if (onSynthesize) onSynthesize(userMessage);
     } catch (error) {
-      console.error('Error in chat:', error);
       setMessages(prev => {
         const newMessages = [...prev];
         const lastIndex = newMessages.length - 1;
-        newMessages[lastIndex] = { 
-          role: 'assistant', 
-          content: 'К сожалению, произошла ошибка сетевого соединения. Попробуйте еще раз.',
-          isGenerating: false 
+        newMessages[lastIndex] = {
+          role: 'assistant',
+          content: 'К сожалению, произошла ошибка при сборке пайплайна. Попробуйте перефразировать запрос.'
         };
         return newMessages;
       });
+    } finally {
+      setIsTyping(false);
     }
   };
 

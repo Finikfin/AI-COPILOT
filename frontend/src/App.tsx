@@ -11,6 +11,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ActionProvider } from "@/contexts/ActionContext";
+import { PipelineProvider } from "@/contexts/PipelineContext";
 import { Layout } from "@/components/layout/Layout";
 import Actions from "./pages/Actions";
 import Home from "./pages/Home";
@@ -73,30 +74,31 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
       <TooltipProvider>
-        <ActionProvider>
-          {/* Toast notification system configuration */}
-          <Toaster
-            position="top-right"
-            theme="light"
-            duration={3500}
-            closeButton
-            toastOptions={{
-              style: {
-                background: '#fff',
-                color: '#222',
-                borderRadius: '10px',
-                boxShadow: '0 4px 24px 0 rgba(0,0,0,0.10)',
-                fontSize: '1rem',
-                fontWeight: 500,
-                border: '1px solid #e5e7eb',
-              },
-            }}
-          />
-          {/* Router with basename for deployment path */}
-          <BrowserRouter basename="/">
-            <AppRoutes />
-          </BrowserRouter>
-        </ActionProvider>
+        <PipelineProvider>
+          <ActionProvider>
+            {/* Toast notification system configuration */}
+            <Toaster
+              position="top-right"
+              theme="dark"
+              duration={3500}
+              toastOptions={{
+                style: {
+                  background: '#18181b',
+                  color: '#fafafa',
+                  borderRadius: '10px',
+                  boxShadow: '0 4px 24px 0 rgba(0,0,0,0.30)',
+                  fontSize: '1rem',
+                  fontWeight: 500,
+                  border: '1px solid #27272a',
+                },
+              }}
+            />
+            {/* Router with basename for deployment path */}
+            <BrowserRouter basename="/">
+              <AppRoutes />
+            </BrowserRouter>
+          </ActionProvider>
+        </PipelineProvider>
       </TooltipProvider>
     </AuthProvider>
   </QueryClientProvider>

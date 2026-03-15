@@ -7,11 +7,6 @@ import { ImportResultsModal } from '@/components/shared/ImportResultsModal';
 import { useNavigate } from 'react-router-dom';
 import { Action } from '@/types/action';
 import { useActionsContext } from '@/contexts/ActionContext';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { generatePipeline } from '@/api/chat';
 import { generateUUID } from '@/lib/utils';
 
@@ -23,7 +18,6 @@ const Home: React.FC = () => {
   const [chatMessage, setChatMessage] = useState('');
   const navigate = useNavigate();
 
-  const isChatDisabled = actions.length === 0;
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -82,28 +76,15 @@ const Home: React.FC = () => {
               placeholder="Как я могу помочь вам с вашими API сегодня?"
               className="bg-transparent border-none shadow-none h-10 pl-4 pr-16 text-lg focus-visible:ring-0"
             />
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div className="absolute right-2 top-2">
-                  <Button
-                    type="submit"
-                    size="icon"
-                    disabled={isChatDisabled}
-                    className={`h-10 w-10 rounded-xl transition-transform active:scale-95 ${isChatDisabled
-                      ? 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
-                      : 'bg-primary hover:bg-primary/90'
-                      }`}
-                  >
-                    <Send className="h-5 w-5" />
-                  </Button>
-                </div>
-              </TooltipTrigger>
-              {isChatDisabled && (
-                <TooltipContent side="top" className="bg-popover text-popover-foreground border-border shadow-xl">
-                  <p>Сначала импортируйте Swagger спецификацию</p>
-                </TooltipContent>
-              )}
-            </Tooltip>
+            <div className="absolute right-2 top-2">
+              <Button
+                type="submit"
+                size="icon"
+                className="h-10 w-10 rounded-xl transition-transform active:scale-95 bg-primary hover:bg-primary/90"
+              >
+                <Send className="h-5 w-5" />
+              </Button>
+            </div>
           </form>
           <div className="flex flex-wrap items-center justify-center gap-4 mt-6">
             <Button
