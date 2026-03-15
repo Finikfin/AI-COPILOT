@@ -65,6 +65,7 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
   const [isTyping, setIsTyping] = useState(false);
   const [isHydrating, setIsHydrating] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const initialMessageProcessed = useRef(false);
   const storageKey = useMemo(() => buildDialogStorageKey(user?.id), [user?.id]);
 
   useEffect(() => {
@@ -245,10 +246,11 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
   );
 
   useEffect(() => {
-    if (!initialMessage || isHydrating) {
+    if (!initialMessage || isHydrating || initialMessageProcessed.current) {
       return;
     }
     if (messages.length === 1 && messages[0]?.role === 'assistant') {
+      initialMessageProcessed.current = true;
       handleSend(initialMessage);
     }
   }, [handleSend, initialMessage, isHydrating, messages]);

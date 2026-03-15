@@ -90,8 +90,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     });
     localStorage.removeItem("auth_token");
     localStorage.removeItem("user_data");
-    localStorage.removeItem("auth_token");
-    localStorage.removeItem("user_data");
   };
 
   const updateUser = (userData: Partial<User>) => {
@@ -103,10 +101,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     setAuthState((prev) => ({ ...prev, user: updatedUser }));
     localStorage.setItem("user_data", JSON.stringify(updatedUser));
   };
-
-  if (isLoading) {
-    return null;
-  }
 
   if (isLoading) {
     return null;

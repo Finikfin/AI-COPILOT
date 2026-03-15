@@ -37,6 +37,7 @@ export const Layout: React.FC = () => {
    * Used for mobile responsive design
    */
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   /**
    * Toggles the sidebar open/closed state
@@ -56,10 +57,15 @@ export const Layout: React.FC = () => {
       {/* Main content area with sidebar and page content */}
       <div className="flex-1 flex overflow-hidden">
         {/* Collapsible sidebar navigation */}
-        <Sidebar isOpen={sidebarOpen} onClose={closeSidebar} />
+        <Sidebar 
+          isOpen={sidebarOpen} 
+          onClose={closeSidebar} 
+          isHistoryOpen={historyOpen}
+          onToggleHistory={() => setHistoryOpen(!historyOpen)}
+        />
         
         {/* Main content area with routing */}
-        <main className="flex-1 overflow-auto">
+        <main className="flex-1 overflow-auto relative">
           <div className="h-full">
             <Outlet />
           </div>

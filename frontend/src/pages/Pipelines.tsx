@@ -222,7 +222,7 @@ export const Pipelines: React.FC = () => {
                       zIndex: isExpanded ? 50 : 10
                     }}
                     className={cn(
-                      "absolute border border-primary/20 bg-card/95 shadow-lg rounded-xl overflow-hidden cursor-pointer transition-colors hover:border-primary/40",
+                      "absolute border border-primary/20 bg-card shadow-lg rounded-xl overflow-hidden cursor-pointer transition-colors hover:border-primary/40",
                       isExpanded ? "shadow-2xl ring-1 ring-primary/10" : "shadow-md"
                     )}
                     style={{
@@ -314,7 +314,7 @@ export const Pipelines: React.FC = () => {
               })}
             </div>
           ) : (
-            <Card className="mx-auto flex max-w-2xl items-center gap-4 border-dashed border-primary/20 bg-card/70 p-8">
+            <Card className="mx-auto flex max-w-2xl items-center gap-4 border-dashed border-primary/20 bg-card p-8">
               <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
                 <Sparkles className="h-6 w-6" />
               </div>

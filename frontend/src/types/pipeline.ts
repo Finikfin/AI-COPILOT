@@ -22,7 +22,7 @@ export interface PipelineEdge {
 }
 
 export interface PipelineData {
-  status: 'ready' | 'success' | 'needs_input' | 'cannot_build';
+  status: 'ready' | 'success' | 'needs_input' | 'cannot_build' | 'error';
   message_ru: string;
   chat_reply_ru: string;
   pipeline_id: string | null;

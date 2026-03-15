@@ -1,5 +1,6 @@
 import { ENDPOINTS } from '@/constants/api';
 import { apiRequest } from '@/lib/api';
+import { PipelineNode, PipelineEdge } from '@/types/pipeline';
 
 export interface GeneratePipelineRequest {
   dialog_id: string;
@@ -13,8 +14,8 @@ export interface GeneratePipelineResponse {
   message_ru: string;
   chat_reply_ru?: string;
   pipeline_id: string | null;
-  nodes: any[];
-  edges: any[];
+  nodes: PipelineNode[];
+  edges: PipelineEdge[];
   missing_requirements?: string[];
   context_summary: string | null;
 }
