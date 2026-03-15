@@ -33,8 +33,8 @@ def chat_json(system_prompt: str, user_prompt: str) -> dict[str, Any] | None:
 
 
 def reset_model_session() -> None:
-    host = os.getenv("OLLAMA_HOST", "http://158.160.90.60:8067").strip()
-    model = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
+    host = os.getenv("OLLAMA_HOST", "http://178.154.193.191:8067").strip()
+    model = os.getenv("OLLAMA_MODEL", "qwen2.5:14b")
     headers = _load_headers()
 
     try:
@@ -68,8 +68,8 @@ async def summarize_dialog_text(messages: list[dict[str, Any]]) -> str | None:
 
 
 def _call_ollama_json(system_prompt: str, user_prompt: str) -> dict[str, Any] | None:
-    host = os.getenv("OLLAMA_HOST", "http://158.160.90.60:8067").strip()
-    model = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
+    host = os.getenv("OLLAMA_HOST", "http://178.154.193.191:8067").strip()
+    model = os.getenv("OLLAMA_MODEL", "qwen2.5:14b")
     headers = _load_headers()
 
     try:
