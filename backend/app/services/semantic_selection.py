@@ -4,10 +4,10 @@ import re
 from typing import NamedTuple
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Capability
+from app.models import Action, Capability
 
 
 class SelectedCapability(NamedTuple):
@@ -160,7 +160,17 @@ class SemanticSelectionService:
 
         query = select(Capability).order_by(Capability.created_at.asc())
         if owner_user_id is not None:
-            query = query.where(Capability.user_id == owner_user_id)
+            # User-scoped with legacy compatibility:
+            # some old capabilities may have user_id=NULL while their source action has owner.
+            query = query.outerjoin(Action, Capability.action_id == Action.id).where(
+                or_(
+                    Capability.user_id == owner_user_id,
+                    and_(
+                        Capability.user_id.is_(None),
+                        Action.user_id == owner_user_id,
+                    ),
+                )
+            )
         query = query.limit(200)
         result = await session.execute(query)
         capabilities = list(result.scalars().all())

@@ -1,5 +1,5 @@
 import { ENDPOINTS } from '@/constants/api';
-import { IngestResponse } from '@/types/action';
+import { Action, IngestResponse } from '@/types/action';
 import { apiRequest } from '@/lib/api';
 
 export const ingestSwagger = async (type: 'file' | 'manual', content: string, filename?: string): Promise<IngestResponse> => {
@@ -13,8 +13,8 @@ export const ingestSwagger = async (type: 'file' | 'manual', content: string, fi
   });
 };
 
-export const getActions = async () => {
-  return apiRequest<any[]>(ENDPOINTS.ACTIONS.LIST, {
+export const getActions = async (): Promise<Action[]> => {
+  return apiRequest<Action[]>(ENDPOINTS.ACTIONS.LIST, {
     method: 'GET'
   }).catch(() => []);
 };
