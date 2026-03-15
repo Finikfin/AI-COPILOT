@@ -19,7 +19,8 @@ class PipelineServiceError(Exception):
 
 
 class PipelineService:
-    LOW_CONFIDENCE_MAX_QUESTIONS = 3
+    LOW_CONFIDENCE_MAX_QUESTIONS = 2
+    LOW_CONFIDENCE_QUESTION_MARKER = "нужно уточнить цель, чтобы построить точный сценарий"
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -137,7 +138,12 @@ class PipelineService:
             self._selection_is_low_confidence(selected_capabilities)
             and low_confidence_attempts < self.LOW_CONFIDENCE_MAX_QUESTIONS
         ):
-            question = self._build_low_confidence_question_ru()
+            question = self._build_low_confidence_question_ru(
+                question_number=low_confidence_attempts + 1,
+                message=message,
+                dialog_messages=dialog_messages,
+                selected_capabilities=selected_capabilities,
+            )
             await self.dialog_memory.append_and_summarize(str(dialog_id), "user", message)
             await self.dialog_memory.append_and_summarize(str(dialog_id), "assistant", question)
             return {
@@ -443,28 +449,136 @@ class PipelineService:
             return False
         return str(selected_capabilities[0].confidence_tier).lower() == "low"
 
-    def _build_low_confidence_question_ru(self) -> str:
-        return (
+    def _build_low_confidence_question_ru(
+        self,
+        *,
+        question_number: int = 1,
+        message: str = "",
+        dialog_messages: list[dict[str, Any]] | None = None,
+        selected_capabilities: list[SelectedCapability] | None = None,
+    ) -> str:
+        prefix = f"Уточнение {max(1, min(question_number, self.LOW_CONFIDENCE_MAX_QUESTIONS))}/{self.LOW_CONFIDENCE_MAX_QUESTIONS}: "
+        outcome_question = (
             "Нужно уточнить цель, чтобы построить точный сценарий. "
             "Какой финальный бизнес-результат нужен: сегмент, рассылка, "
             "обновление CRM или отчёт?"
+        )
+        if question_number <= 1:
+            return prefix + outcome_question
+
+        if not selected_capabilities:
+            return prefix + outcome_question
+
+        context_tokens = self._collect_user_context_tokens(
+            message=message,
+            dialog_messages=dialog_messages or [],
+        )
+        missing_inputs = self._collect_missing_required_inputs(
+            selected_capabilities=selected_capabilities,
+            context_tokens=context_tokens,
+            limit=3,
+        )
+        if not missing_inputs:
+            return (
+                prefix
+                + "Нужно уточнить входные ограничения для точного графа. "
+                + "Укажите: кого выбираем, по каким фильтрам, и какие поля обязательны в результате."
+            )
+
+        humanized_inputs = ", ".join(self._humanize_input_name(name) for name in missing_inputs)
+        return (
+            f"{prefix}Нужно уточнить цель, чтобы построить точный сценарий. "
+            f"Чтобы собрать исполнимый граф, уточните входные данные: {humanized_inputs}."
         )
 
     def _count_low_confidence_questions(
         self,
         dialog_messages: list[dict[str, Any]],
     ) -> int:
-        marker = "какой финальный бизнес-результат нужен"
         count = 0
-        for item in dialog_messages:
+        # Count only the current clarification chain (from the end of dialog),
+        # so each new request can start a fresh 2-step clarification when needed.
+        for item in reversed(dialog_messages):
             if not isinstance(item, dict):
                 continue
-            if str(item.get("role", "")).lower() != "assistant":
+            role = str(item.get("role", "")).lower()
+            if role == "user":
+                continue
+            if role != "assistant":
                 continue
             content = str(item.get("content", "")).lower()
-            if marker in content:
+            if self._is_low_confidence_question(content):
                 count += 1
+                continue
+            break
         return count
+
+    def _is_low_confidence_question(self, content: str) -> bool:
+        content = content.strip().lower()
+        return (
+            content.startswith("уточнение ")
+            or self.LOW_CONFIDENCE_QUESTION_MARKER in content
+        )
+
+    def _collect_user_context_tokens(
+        self,
+        *,
+        message: str,
+        dialog_messages: list[dict[str, Any]],
+    ) -> set[str]:
+        tokens = set(self._tokenize_text(message or ""))
+        for item in dialog_messages[-6:]:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("role", "")).lower() != "user":
+                continue
+            tokens.update(self._tokenize_text(str(item.get("content", ""))))
+        return tokens
+
+    def _collect_missing_required_inputs(
+        self,
+        *,
+        selected_capabilities: list[SelectedCapability],
+        context_tokens: set[str],
+        limit: int = 3,
+    ) -> list[str]:
+        missing: list[str] = []
+        seen: set[str] = set()
+
+        for item in selected_capabilities[:3]:
+            required_inputs = self._extract_required_inputs(
+                getattr(item.capability, "input_schema", None)
+            )
+            for required_input in required_inputs:
+                key = str(required_input).strip().lower()
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+
+                required_tokens = self._tokenize_field_name(required_input)
+                if required_tokens and required_tokens & context_tokens:
+                    continue
+
+                missing.append(str(required_input))
+                if len(missing) >= limit:
+                    return missing
+
+        return missing
+
+    def _tokenize_field_name(self, value: str) -> set[str]:
+        normalized = re.sub(r"([a-z])([A-Z])", r"\1 \2", str(value))
+        normalized = normalized.replace("_", " ").replace("-", " ")
+        tokens = self._tokenize_text(normalized)
+
+        value_lower = str(value).lower()
+        if value_lower.endswith("_id") and len(value_lower) > 3:
+            tokens.add(value_lower[:-3])
+        return tokens
+
+    def _humanize_input_name(self, name: str) -> str:
+        label = re.sub(r"([a-z])([A-Z])", r"\1 \2", str(name))
+        label = label.replace("_", " ").replace("-", " ").strip()
+        return label or str(name)
 
     def _normalize_workflow(
         self,

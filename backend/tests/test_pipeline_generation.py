@@ -268,7 +268,25 @@ def test_generate_returns_needs_input_on_low_confidence_selection():
     assert "selection:low_confidence" in result["missing_requirements"]
 
 
-def test_low_confidence_attempts_1_2_3_then_build_on_4th():
+def test_second_clarification_question_mentions_missing_required_inputs():
+    service = _build_service()
+    capability = _build_capability()
+    selected = [
+        SelectedCapability(capability=capability, score=0.2, confidence_tier="low")
+    ]
+
+    question = service._build_low_confidence_question_ru(
+        question_number=2,
+        message="Собери сценарий рассылки по пользователям",
+        dialog_messages=[{"role": "user", "content": "Сделай рассылку"}],
+        selected_capabilities=selected,
+    )
+
+    assert "уточнение 2/2" in question.lower()
+    assert "token" in question.lower()
+
+
+def test_low_confidence_attempts_1_2_then_build_on_3rd():
     service = _build_service()
     capability = _build_capability()
     selected = [
@@ -304,7 +322,8 @@ def test_low_confidence_attempts_1_2_3_then_build_on_4th():
 
     dialog_id = uuid4()
     user_id = uuid4()
-    for _ in range(3):
+    responses = []
+    for _ in range(2):
         result = asyncio.run(
             service.generate(
                 dialog_id=dialog_id,
@@ -312,8 +331,12 @@ def test_low_confidence_attempts_1_2_3_then_build_on_4th():
                 user_id=user_id,
             )
         )
+        responses.append(result)
         assert result["status"] == "needs_input"
         assert graph_called["value"] is False
+
+    assert "уточнение 1/2" in responses[0]["chat_reply_ru"].lower()
+    assert "уточнение 2/2" in responses[1]["chat_reply_ru"].lower()
 
     result = asyncio.run(
         service.generate(
