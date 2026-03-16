@@ -1,10 +1,10 @@
 import {
   Zap,
-  Plus,
   Search,
   Link2,
   FolderIcon,
-  ExternalLink
+  GitMerge,
+  Loader2,
 } from 'lucide-react';
 import React from 'react';
 import {
@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/popover";
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 import {
   Card,
   CardContent,
@@ -28,9 +29,25 @@ import {
 } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useActionsContext } from '@/contexts/ActionContext';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { createCompositeCapability } from '@/api/capabilities';
+import { toast } from 'sonner';
 
 const Capabilities: React.FC = () => {
-  const { actions, filteredCapabilities, searchTerm, setSearchTerm } = useActionsContext();
+  const { actions, capabilities, filteredCapabilities, searchTerm, setSearchTerm, addCapabilities } = useActionsContext();
+  const [isCompositeDialogOpen, setIsCompositeDialogOpen] = React.useState(false);
+  const [isCreatingComposite, setIsCreatingComposite] = React.useState(false);
+  const [compositeName, setCompositeName] = React.useState('');
+  const [compositeDescription, setCompositeDescription] = React.useState('');
+  const [selectedAtomicCapabilityIds, setSelectedAtomicCapabilityIds] = React.useState<string[]>([]);
 
   const getMethodColor = (method: string) => {
     switch (method?.toUpperCase()) {
@@ -45,14 +62,84 @@ const Capabilities: React.FC = () => {
 
   const groupedCapabilities = React.useMemo(() => {
     return filteredCapabilities.reduce((acc, cap) => {
+      const isComposite = String(cap.type || 'ATOMIC').toUpperCase() === 'COMPOSITE';
       const associatedActions = actions.filter(a => a.id === cap.action_id);
       const action = associatedActions[0];
-      const filename = action?.source_filename || 'General Capabilities';
+      const filename = isComposite
+        ? 'Composite Capabilities'
+        : action?.source_filename || 'General Capabilities';
       if (!acc[filename]) acc[filename] = [];
       acc[filename].push({ capability: cap, associatedActions });
       return acc;
     }, {} as Record<string, Array<{ capability: typeof filteredCapabilities[0], associatedActions: typeof actions }>>);
   }, [actions, filteredCapabilities]);
+
+  const atomicCapabilities = React.useMemo(() => {
+    return capabilities.filter((cap) => String(cap.type || 'ATOMIC').toUpperCase() === 'ATOMIC');
+  }, [capabilities]);
+
+  const resetCompositeForm = React.useCallback(() => {
+    setCompositeName('');
+    setCompositeDescription('');
+    setSelectedAtomicCapabilityIds([]);
+    setIsCreatingComposite(false);
+  }, []);
+
+  const toggleAtomicCapability = React.useCallback((capabilityId: string, checked: boolean) => {
+    setSelectedAtomicCapabilityIds((prev) => {
+      const exists = prev.includes(capabilityId);
+      if (checked && !exists) {
+        return [...prev, capabilityId];
+      }
+      if (!checked && exists) {
+        return prev.filter((id) => id !== capabilityId);
+      }
+      return prev;
+    });
+  }, []);
+
+  const handleCreateComposite = React.useCallback(async () => {
+    const normalizedName = compositeName.trim();
+    if (!normalizedName) {
+      toast.error('Введите название composite capability');
+      return;
+    }
+    if (selectedAtomicCapabilityIds.length === 0) {
+      toast.error('Выберите хотя бы одну atomic capability');
+      return;
+    }
+
+    setIsCreatingComposite(true);
+    try {
+      const payload = {
+        name: normalizedName,
+        description: compositeDescription.trim() || null,
+        recipe: {
+          version: 1 as const,
+          steps: selectedAtomicCapabilityIds.map((capabilityId, index) => ({
+            step: index + 1,
+            capability_id: capabilityId,
+            inputs: {},
+          })),
+        },
+      };
+      const created = await createCompositeCapability(payload);
+      addCapabilities([created]);
+      toast.success(`Composite capability "${created.name}" создана`);
+      setIsCompositeDialogOpen(false);
+      resetCompositeForm();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Не удалось создать composite capability';
+      toast.error(message);
+      setIsCreatingComposite(false);
+    }
+  }, [
+    addCapabilities,
+    compositeDescription,
+    compositeName,
+    resetCompositeForm,
+    selectedAtomicCapabilityIds,
+  ]);
 
   return (
     <div className="flex h-full flex-col px-4 sm:px-6 py-6 sm:py-8">
@@ -66,6 +153,17 @@ const Capabilities: React.FC = () => {
           <p className="text-muted-foreground mt-1 text-sm">
             Бизнес-навыки, созданные путем объединения нескольких API Actions. Обучены для понимания вашим ИИ.
           </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            className="gap-2"
+            onClick={() => setIsCompositeDialogOpen(true)}
+            disabled={atomicCapabilities.length === 0}
+          >
+            <GitMerge className="h-4 w-4" />
+            Create Composite
+          </Button>
         </div>
       </div>
 
@@ -104,10 +202,13 @@ const Capabilities: React.FC = () => {
                     {items.map(({ capability: cap, associatedActions }) => (
                       <Card key={cap.id} className="bg-card border-border hover:border-primary/50 transition-all group overflow-hidden flex flex-col h-full min-h-[180px] shadow-sm hover:shadow-md">
                         <CardHeader className="p-4 pb-2">
-                          <div className="flex items-start justify-between">
+                          <div className="flex items-start justify-between gap-2">
                             <div className="bg-primary/10 p-1.5 rounded-lg mb-2 shrink-0">
                               <Zap className="h-4 w-4 text-primary" />
                             </div>
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                              {String(cap.type || 'ATOMIC').toUpperCase()}
+                            </Badge>
                           </div>
                           <CardTitle className="text-sm font-semibold text-foreground group-hover:text-primary transition-colors line-clamp-1">
                             {cap.name}
@@ -119,46 +220,51 @@ const Capabilities: React.FC = () => {
                           </p>
 
                           <div className="mt-4 pt-3 border-t border-border/50 flex items-center justify-between text-[10px] text-muted-foreground">
-                            <Popover>
-                              <PopoverTrigger asChild>
-                                <button className="flex items-center gap-1.5 font-medium hover:text-primary transition-colors cursor-pointer group/link">
-                                  <Link2 className="h-3 w-3 group-hover/link:scale-110 transition-transform" />
-                                  <span>{associatedActions.length} Actions</span>
-                                </button>
-                              </PopoverTrigger>
-                              <PopoverContent className="w-80 p-0 overflow-hidden border-border bg-card shadow-2xl">
-                                <div className="p-3 border-b border-border bg-muted/30">
-                                  <h4 className="text-xs font-bold text-foreground">Связанные API Методы</h4>
-                                </div>
-                                <div className="max-h-[300px] overflow-auto custom-scrollbar">
-                                  {associatedActions.length > 0 ? (
-                                    <div className="divide-y divide-border/50">
-                                      {associatedActions.map((action) => (
-                                        <div key={action.id} className="p-3 hover:bg-muted/50 transition-colors">
-                                          <div className="flex items-center gap-2 mb-1">
-                                            <Badge variant="outline" className={cn("px-1 py-0 text-[9px] font-bold border-none h-4", getMethodColor(action.method))}>
-                                              {action.method}
-                                            </Badge>
-                                            <code className="text-[10px] text-foreground font-mono truncate max-w-[180px]">
-                                              {action.path}
-                                            </code>
+                            {String(cap.type || 'ATOMIC').toUpperCase() === 'COMPOSITE' ? (
+                              <span className="font-medium">
+                                Recipe steps: {cap.recipe?.steps?.length ?? 0}
+                              </span>
+                            ) : (
+                              <Popover>
+                                <PopoverTrigger asChild>
+                                  <button className="flex items-center gap-1.5 font-medium hover:text-primary transition-colors cursor-pointer group/link">
+                                    <Link2 className="h-3 w-3 group-hover/link:scale-110 transition-transform" />
+                                    <span>{associatedActions.length} Actions</span>
+                                  </button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-80 p-0 overflow-hidden border-border bg-card shadow-2xl">
+                                  <div className="p-3 border-b border-border bg-muted/30">
+                                    <h4 className="text-xs font-bold text-foreground">Связанные API Методы</h4>
+                                  </div>
+                                  <div className="max-h-[300px] overflow-auto custom-scrollbar">
+                                    {associatedActions.length > 0 ? (
+                                      <div className="divide-y divide-border/50">
+                                        {associatedActions.map((action) => (
+                                          <div key={action.id} className="p-3 hover:bg-muted/50 transition-colors">
+                                            <div className="flex items-center gap-2 mb-1">
+                                              <Badge variant="outline" className={cn("px-1 py-0 text-[9px] font-bold border-none h-4", getMethodColor(action.method))}>
+                                                {action.method}
+                                              </Badge>
+                                              <code className="text-[10px] text-foreground font-mono truncate max-w-[180px]">
+                                                {action.path}
+                                              </code>
+                                            </div>
+                                            <p className="text-[10px] text-muted-foreground line-clamp-2 leading-relaxed">
+                                              {action.summary || action.description || 'Нет описания'}
+                                            </p>
                                           </div>
-                                          <p className="text-[10px] text-muted-foreground line-clamp-2 leading-relaxed">
-                                            {action.summary || action.description || 'Нет описания'}
-                                          </p>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  ) : (
-                                    <div className="p-8 text-center">
-                                      <p className="text-xs text-muted-foreground">Методы не найдены</p>
-                                    </div>
-                                  )}
-                                </div>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <div className="p-8 text-center">
+                                        <p className="text-xs text-muted-foreground">Методы не найдены</p>
+                                      </div>
+                                    )}
+                                  </div>
 
-                              </PopoverContent>
-                            </Popover>
-
+                                </PopoverContent>
+                              </Popover>
+                            )}
                           </div>
                         </CardContent>
                       </Card>
@@ -175,6 +281,101 @@ const Capabilities: React.FC = () => {
           </div>
         )}
       </div>
+      <Dialog
+        open={isCompositeDialogOpen}
+        onOpenChange={(open) => {
+          setIsCompositeDialogOpen(open);
+          if (!open && !isCreatingComposite) {
+            resetCompositeForm();
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Create Composite Capability</DialogTitle>
+            <DialogDescription>
+              Соберите новый composite capability из существующих atomic capabilities.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-foreground">Название</label>
+              <Input
+                value={compositeName}
+                onChange={(e) => setCompositeName(e.target.value)}
+                placeholder="Например: travel_offer_full_flow"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-foreground">Описание</label>
+              <Input
+                value={compositeDescription}
+                onChange={(e) => setCompositeDescription(e.target.value)}
+                placeholder="Короткое описание назначения composite capability"
+              />
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium text-foreground">Шаги (atomic capabilities)</label>
+                <span className="text-xs text-muted-foreground">
+                  Выбрано: {selectedAtomicCapabilityIds.length}
+                </span>
+              </div>
+              <div className="max-h-64 overflow-auto border border-border rounded-lg divide-y divide-border/50">
+                {atomicCapabilities.map((capability) => {
+                  const selectedIndex = selectedAtomicCapabilityIds.indexOf(capability.id);
+                  const isChecked = selectedIndex >= 0;
+                  return (
+                    <label key={capability.id} className="flex items-start gap-3 p-3 cursor-pointer hover:bg-muted/30 transition-colors">
+                      <Checkbox
+                        checked={isChecked}
+                        onCheckedChange={(checked) => toggleAtomicCapability(capability.id, checked === true)}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium text-foreground truncate">{capability.name}</span>
+                          {isChecked && (
+                            <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                              Step {selectedIndex + 1}
+                            </Badge>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">
+                          {capability.description || 'Без описания'}
+                        </p>
+                      </div>
+                    </label>
+                  );
+                })}
+                {atomicCapabilities.length === 0 && (
+                  <div className="p-4 text-sm text-muted-foreground text-center">
+                    Нет atomic capabilities для сборки composite.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsCompositeDialogOpen(false)}
+              disabled={isCreatingComposite}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => void handleCreateComposite()}
+              disabled={isCreatingComposite || selectedAtomicCapabilityIds.length === 0 || !compositeName.trim()}
+              className="gap-2"
+            >
+              {isCreatingComposite && <Loader2 className="h-4 w-4 animate-spin" />}
+              Create
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

@@ -19,7 +19,8 @@ class PipelineServiceError(Exception):
 
 
 class PipelineService:
-    LOW_CONFIDENCE_MAX_QUESTIONS = 2
+    # Clarification loop is disabled: service should attempt a full graph in one shot.
+    LOW_CONFIDENCE_MAX_QUESTIONS = 0
     LOW_CONFIDENCE_QUESTION_MARKER = "нужно уточнить цель, чтобы построить точный сценарий"
     LOW_CONFIDENCE_DIALOG_MARKER = "[[low_confidence_question]]"
     STRICT_CAPABILITY_ISSUES = {
@@ -49,19 +50,6 @@ class PipelineService:
         capability_ids: list[UUID] | None = None,
         previous_pipeline_id: UUID | None = None,
     ) -> dict[str, Any]:
-        if self._is_low_quality_message(message):
-            return {
-                "status": "needs_input",
-                "message_ru": "Запрос слишком короткий или не похож на задачу автоматизации.",
-                "chat_reply_ru": (
-                    "Опишите задачу понятнее: что получить, какие данные использовать "
-                    "и какой результат нужен."
-                ),
-                "nodes": [],
-                "edges": [],
-                "context_summary": None,
-            }
-
         dialog_messages, dialog_summary = await self.dialog_memory.get_context(
             str(dialog_id)
         )
@@ -135,32 +123,6 @@ class PipelineService:
                 "nodes": [],
                 "edges": [],
                 "missing_requirements": ["selection:no_matches"],
-                "context_summary": dialog_summary,
-            }
-
-        low_confidence_attempts = self._count_low_confidence_questions(dialog_messages)
-        if (
-            self._selection_is_low_confidence(selected_capabilities)
-            and low_confidence_attempts < self.LOW_CONFIDENCE_MAX_QUESTIONS
-        ):
-            question = self._build_low_confidence_question_ru(
-                question_number=low_confidence_attempts + 1,
-                message=message,
-                dialog_messages=dialog_messages,
-                selected_capabilities=selected_capabilities,
-            )
-            dialog_question = self._attach_low_confidence_marker(question)
-            await self.dialog_memory.append_and_summarize(str(dialog_id), "user", message)
-            await self.dialog_memory.append_and_summarize(
-                str(dialog_id), "assistant", dialog_question
-            )
-            return {
-                "status": "needs_input",
-                "message_ru": "Нужно уточнение цели, чтобы собрать корректный сценарий.",
-                "chat_reply_ru": question,
-                "nodes": [],
-                "edges": [],
-                "missing_requirements": ["selection:low_confidence"],
                 "context_summary": dialog_summary,
             }
 
@@ -530,7 +492,14 @@ class PipelineService:
             "Expected links:\n"
             "- node[3].input_connected_from = [1,2]\n"
             "- node[1].output_connected_to contains 3\n"
-            "- node[2].output_connected_to contains 3"
+            "- node[2].output_connected_to contains 3\n\n"
+            "TARGET_LINEAR_PATTERN_IF_RELEVANT:\n"
+            "- Step 1: get recently active users\n"
+            "- Step 2: get top hotels\n"
+            "- Step 3: segment users by hotel interests (consumes 1+2)\n"
+            "- Step 4: assign specific hotels to users (consumes 3)\n"
+            "- Step 5: send personalized offers to users (consumes 4)\n"
+            "- Step 6: evaluate lead quality (consumes 5 and/or 4)\n"
         )
 
         return (

@@ -7,6 +7,7 @@ export const ENDPOINTS = {
   },
   CAPABILITIES: {
     LIST: `${API_BASE_URL}/capabilities`,
+    CREATE_COMPOSITE: `${API_BASE_URL}/capabilities/composite`,
   },
   AUTH: {
     LOGIN: `${API_BASE_URL}/auth/login`,

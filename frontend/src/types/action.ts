@@ -7,11 +7,11 @@ export interface Action {
   summary?: string;
   description?: string;
   tags?: string[] | null;
-  parameters_schema?: any;
-  request_body_schema?: any;
-  response_schema?: any;
+  parameters_schema?: unknown;
+  request_body_schema?: unknown;
+  response_schema?: unknown;
   source_filename?: string;
-  raw_spec?: any;
+  raw_spec?: unknown;
   created_at?: string;
   updated_at?: string;
   // For UI compatibility with previous mock data
@@ -20,9 +20,36 @@ export interface Action {
 
 export interface Capability {
   id: string;
-  action_id: string;
+  user_id?: string | null;
+  action_id: string | null;
+  type?: 'ATOMIC' | 'COMPOSITE' | string;
   name: string;
-  description: string;
+  description: string | null;
+  input_schema?: Record<string, unknown> | null;
+  output_schema?: Record<string, unknown> | null;
+  recipe?: CompositeRecipe | null;
+  data_format?: Record<string, unknown> | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CompositeRecipeStep {
+  step: number;
+  capability_id: string;
+  inputs: Record<string, string>;
+}
+
+export interface CompositeRecipe {
+  version: 1;
+  steps: CompositeRecipeStep[];
+}
+
+export interface CreateCompositeCapabilityRequest {
+  name: string;
+  description?: string | null;
+  input_schema?: Record<string, unknown> | null;
+  output_schema?: Record<string, unknown> | null;
+  recipe: CompositeRecipe;
 }
 
 export interface IngestResponse {
