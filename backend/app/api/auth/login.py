@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database.session import get_session
-from app.models import User, UserRole
+from app.models import User
 from app.schemas.auth_sch import LoginIn
 from app.utils.business_logger import log_business_event
 from app.utils.hashing import verify_password
@@ -19,17 +19,29 @@ async def login(
     request: Request,
     session: AsyncSession = Depends(get_session),
 ):
-    email = data.email.lower()
+    email = data.email.strip().lower()
     trace_id = getattr(request.state, "traceId", None)
-    result = await session.execute(select(User).where(User.email == email))
+    result = await session.execute(select(User).where(func.lower(User.email) == email))
     user = result.scalar_one_or_none()
 
-    if user is None or not verify_password(data.password, user.hashed_password):
+    if user is None:
         log_business_event(
             "auth_login_failed",
             trace_id=trace_id,
             email=email,
-            reason="invalid_credentials",
+            reason="user_not_found",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"message": "Invalid email or password"},
+        )
+
+    if not verify_password(data.password, user.hashed_password):
+        log_business_event(
+            "auth_login_failed",
+            trace_id=trace_id,
+            email=email,
+            reason="invalid_password",
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
