@@ -1,0 +1,174 @@
+openapi: 3.1.0
+info:
+  title: Travel & CRM Pipeline API
+  description: |
+    Это API предназначено для автоматизации маркетинговых и операционных процессов в сфере туризма.
+    Оно поддерживает два основных сценария автоматизации (пайплайна):
+
+    ### 1. Сценарий: Рассылка спецпредложений по отелям
+    Используется для реактивации пользователей, которые были активны недавно.
+    **Цепочка:** Получение юзеров → Подбор топ-отелей → Сегментация (матчинг) → Назначение конкретных пар Юзер-Отель → Отправка Email.
+
+    ### 2. Сценарий: Обработка лидов в CRM
+    Предназначен для отдела продаж.
+    **Цепочка:** Сбор новых лидов → Квалификация (оценка качества) → Подготовка оффера → Финальная отправка.
+  version: 1.1.0
+servers:
+  - url: http://84.201.161.175:8010
+paths:
+  /users/recent:
+    get:
+      tags:
+        - travel-offer-workflow
+      summary: Получить список недавно активных пользователей
+      description: |
+        Возвращает список клиентов, которые заходили в приложение за последнее время.
+        Используйте этот метод как входную точку для начала маркетинговой кампании.
+      operationId: getRecentUsers
+      parameters:
+        - name: last_active_after
+          in: query
+          description: Фильтр по дате и времени. Будут возвращены только те, кто был активен ПОСЛЕ указанного момента.
+          required: false
+          schema:
+            anyOf:
+              - type: string
+                format: date-time
+              - type: "null"
+        - name: limit
+          in: query
+          description: Ограничение выборки. По умолчанию возвращается 30 пользователей для оптимальной нагрузки на почтовый сервер.
+          required: false
+          schema:
+            type: integer
+            maximum: 100
+            minimum: 1
+            default: 30
+      responses:
+        "200":
+          description: Список пользователей успешно сформирован.
+
+  /hotels/top:
+    get:
+      tags:
+        - travel-offer-workflow
+      summary: Получить список популярных отелей
+      description: |
+        Выгружает наиболее востребованные отели. Можно фильтровать по конкретному городу, чтобы сделать предложение более точным.
+      operationId: getTopHotels
+      parameters:
+        - name: limit
+          in: query
+          description: Максимальное количество отелей в выдаче (не более 20).
+        - name: city
+          in: query
+          description: Название города (например, 'Moscow', 'Dubai'). Если не указано, вернутся топ-отели по всем направлениям.
+      responses:
+        "200":
+          description: Список отелей получен.
+
+  /segments/hotel:
+    post:
+      tags:
+        - travel-offer-workflow
+      summary: Сгруппировать пользователей по интересам к отелям
+      description: |
+        Принимает списки пользователей и отелей, анализирует их и создает группы (сегменты).
+        Это "умный" этап, который определяет, кому какой тип отдыха подходит больше.
+      operationId: segmentUsersByHotelPreferences
+      requestBody:
+        description: Данные для анализа (массивы объектов User и Hotel).
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HotelSegmentsRequest"
+      responses:
+        "200":
+          description: Сегментация успешно завершена.
+
+  /assignments/hotels:
+    post:
+      tags:
+        - travel-offer-workflow
+      summary: Назначить конкретные отели пользователям
+      description: |
+        Финальное закрепление. На основе сегментов метод создает пары "ID пользователя — ID отеля".
+        Результат этого метода передается напрямую в сервис рассылки.
+      operationId: assignUsersToHotels
+      responses:
+        "200":
+          description: Пары для рассылки сформированы.
+
+  /emails/send-offers:
+    post:
+      tags:
+        - travel-offer-workflow
+      summary: Разослать персонализированные предложения
+      description: |
+        Запускает процесс отправки писем. Требует ID шаблона письма и список назначений, сформированный на предыдущем шаге.
+      operationId: sendHotelOffersByEmail
+      requestBody:
+        description: Шаблон письма и список получателей с назначенными им отелями.
+      responses:
+        "200":
+          description: Рассылка запущена. В ответе придет статистика (сколько отправлено, сколько сбоев).
+
+  /crm/leads/qualify:
+    post:
+      tags:
+        - crm-linear-workflow
+      summary: Оценить качество лидов (Lead Scoring)
+      description: |
+        Метод проверяет входящие заявки и присваивает им рейтинг (score) и уровень (tier).
+        Это позволяет продакту сфокусироваться на самых "горячих" клиентах.
+      operationId: qualifyLeadsForOffer
+      responses:
+        "200":
+          description: Лиды успешно квалифицированы.
+
+components:
+  schemas:
+    User:
+      type: object
+      description: Информация о клиенте сервиса.
+      properties:
+        id:
+          type: string
+          description: Уникальный идентификатор пользователя (UUID).
+        email:
+          type: string
+          description: Адрес электронной почты для связи.
+        last_active:
+          type: string
+          format: date-time
+          description: Таймстамп последнего действия в системе
+
+    Hotel:
+      type: object
+      description: Информация об отеле.
+      properties:
+        id:
+          type: string
+          description: Уникальный идентификатор отеля.
+        name:
+          type: string
+          description: Название отеля.
+        city:
+          type: string
+          description: Город расположения отеля.
+
+    HotelSegmentsRequest:
+      type: object
+      description: Данные для сегментации пользователей по отелям.
+      required:
+        - users
+        - hotels
+      properties:
+        users:
+          type: array
+          items:
+            $ref: "#/components/schemas/User"
+        hotels:
+          type: array
+          items:
+            $ref: "#/components/schemas/Hotel"
