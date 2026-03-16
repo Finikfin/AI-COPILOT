@@ -47,7 +47,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   }, []);
 
   const login = async (email: string, password: string) => {
-    const response = await authApi.login({ email, password });
+    const response = await authApi.login({ email: email.trim(), password });
     const { accessToken, user } = response;
 
     setAuthState({
@@ -66,8 +66,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     password: string,
   ) => {
     const response = await authApi.register({
-      email,
-      fullName,
+      email: email.trim(),
+      fullName: fullName.trim(),
       password,
     });
     const { accessToken, user } = response;

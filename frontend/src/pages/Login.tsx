@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { LogIn, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -26,17 +26,17 @@ const Login: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !password) {
-      toast.error("Пожалуйста, заполните все поля");
+      toast.error("Please fill in email and password");
       return;
     }
 
     setIsLoading(true);
     try {
       await login(email, password);
-      toast.success("Успешный вход");
+      toast.success("Logged in successfully");
       navigate("/");
     } catch (error: any) {
-      toast.error(error.message || "Ошибка входа");
+      toast.error(error.message || "Login failed");
     } finally {
       setIsLoading(false);
     }
@@ -53,10 +53,9 @@ const Login: React.FC = () => {
               </span>
             </div>
           </div>
-          <CardTitle className="text-2xl font-bold">Вход в систему</CardTitle>
+          <CardTitle className="text-2xl font-bold">Sign In</CardTitle>
           <CardDescription>
-            Если email новый, аккаунт создастся автоматически. Если email уже
-            существует, войти можно только с правильным паролем.
+            Login is for existing accounts only.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -75,11 +74,11 @@ const Login: React.FC = () => {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Пароль</Label>
+              <Label htmlFor="password">Password</Label>
               <Input
                 id="password"
                 type="password"
-                placeholder="123456"
+                placeholder="your password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 disabled={isLoading}
@@ -97,12 +96,17 @@ const Login: React.FC = () => {
               ) : (
                 <LogIn className="h-4 w-4" />
               )}
-              {isLoading ? "Обработка..." : "Продолжить"}
+              {isLoading ? "Signing in..." : "Sign In"}
             </Button>
           </form>
         </CardContent>
-        <CardFooter className="text-center text-sm text-muted-foreground">
-          Новый email создаст аккаунт. Существующий email требует тот же пароль.
+        <CardFooter className="flex flex-col space-y-4">
+          <div className="text-center text-sm text-muted-foreground">
+            Need an account?{" "}
+            <Link to="/register" className="text-primary font-medium hover:underline">
+              Register
+            </Link>
+          </div>
         </CardFooter>
       </Card>
     </div>
