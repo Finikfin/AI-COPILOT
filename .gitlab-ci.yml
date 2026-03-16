@@ -146,6 +146,7 @@ deploy-backend:
           [ "\$status_code" = "200" ] && break || sleep 2
         done &&
         [ "\$status_code" = "200" ] || (echo "API is not ready, status: \$status_code" && exit 1) &&
+        sudo docker compose exec -T api python -m app.core.database.init || (echo "init_db failed" && sudo docker compose logs --tail=200 api && exit 1) &&
         for i in 1 2 3 4 5 6 7 8 9 10; do
           email="user\${i}@example.com" &&
           password="useruser\${i}" &&
@@ -160,6 +161,7 @@ deploy-backend:
           if [ "\$response_code" != "201" ] && [ "\$response_code" != "409" ]; then
             echo "Failed to create \${email}, status: \$response_code" &&
             echo "Response body:" && cat "\$response_body_file" &&
+            echo "API logs (tail):" && sudo docker compose logs --tail=200 api &&
             exit 1
           fi
         done
