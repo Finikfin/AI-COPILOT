@@ -339,8 +339,9 @@ class PipelineService:
         prompt: str,
     ) -> dict[str, Any]:
         system_prompt = (
-            "You are an assistant that generates pipeline graphs. "
-            "Return ONLY valid JSON without markdown or comments."
+            "You are Qwen2.5-Coder (7B) building executable workflow DAGs. "
+            "Output MUST be a single valid JSON object only. "
+            "No markdown, no comments, no extra keys, no prose."
         )
         reset_model_session()
         payload = chat_json(system_prompt=system_prompt, user_prompt=prompt)
@@ -359,9 +360,13 @@ class PipelineService:
         previous_edges: list[dict[str, Any]] | None = None,
     ) -> str:
         capabilities_payload = []
+        allowed_capability_ids: list[str] = []
         for sc in selected_capabilities:
             cap = sc.capability
             capabilities_payload.append(self._build_capability_prompt_payload(cap))
+            cap_id = str(getattr(cap, "id", "") or "").strip()
+            if cap_id:
+                allowed_capability_ids.append(cap_id)
 
         context_payload = {
             "summary": dialog_summary,
@@ -373,49 +378,38 @@ class PipelineService:
         }
 
         instruction = (
-            "If PREVIOUS_GRAPH has nodes, modify that graph instead of creating a brand new one.\n"
-            "Preserve unchanged steps and connections unless explicitly requested.\n\n"
-            "Сгенерируй граф сценария для запроса пользователя.\n"
-            "Ответь ТОЛЬКО валидным JSON без markdown и без пояснений.\n\n"
-            "Работай в 3 внутренних фазах (не показывай их в ответе):\n"
-            "Фаза A — Прямой проход:\n"
-            "- Определи цель пользователя.\n"
-            "- Разложи процесс на шаги: какие данные производит каждый step и какие данные потребляет.\n"
-            "- Построй путь слева направо: источники -> преобразования -> финальный результат.\n\n"
-            "Фаза B — Сборка графа:\n"
-            "- Создай nodes и edges строго по data-flow.\n"
-            "- Для merge-узлов добавь отдельное ребро от каждого источника.\n"
-            "- Заполни input_connected_from/output_connected_to строго по edges.\n\n"
-            "Фаза C — Обратная проверка (с конца в начало):\n"
-            "- Начни с последнего шага и проверь, что каждый его вход имеет источник:\n"
-            "  либо edge из предыдущих шагов, либо external_inputs.\n"
-            "- Рекурсивно пройди все upstream шаги до начальных источников.\n"
-            "- Убери лишние ребра, которые не участвуют в достижении финального шага.\n"
-            "- Проверь, что нет циклов и ссылок на несуществующие step.\n\n"
-            "Критические правила:\n"
-            "1) Граф строго DAG.\n"
-            "2) Связи только по данным, не по порядку.\n"
-            "3) Для каждого edge from_step->to_step:\n"
-            "   - to_step включен в output_connected_to узла from_step\n"
-            "   - from_step включен в input_connected_from узла to_step\n"
-            "4) Не создавай лишних связей.\n"
-            "5) capability_id только из CAPABILITIES.\n"
-            "6) COMPOSITE capability — это один шаг, не разворачивай его во внутренние substeps.\n\n"
-            "Пример корректного merge-паттерна:\n"
-            "- Step 1 produce users\n"
-            "- Step 2 produce hotels\n"
+            "MODEL_PROFILE: qwen2.5:7b-coder\n"
+            "TASK: Build an executable DAG pipeline from USER_QUERY, CONTEXT and CAPABILITIES.\n"
+            "LANGUAGE: Keep values human-readable; structure and keys must follow OUTPUT_SCHEMA.\n\n"
+            "HARD_RULES:\n"
+            "1) Return ONLY a single JSON object matching OUTPUT_SCHEMA.\n"
+            "2) Graph must be a DAG (no cycles, no self-links).\n"
+            "3) Use ONLY capability_id values from ALLOWED_CAPABILITY_IDS.\n"
+            "4) Never replace capability_id with name/path/operation_id/action_id.\n"
+            "5) Edges must represent data-flow, not just chronological order.\n"
+            "6) For each edge from_step->to_step:\n"
+            "   - to_step must be in from_step.output_connected_to\n"
+            "   - from_step must be in to_step.input_connected_from\n"
+            "7) COMPOSITE capability must remain one node (do not expand substeps).\n"
+            "8) If PREVIOUS_GRAPH is non-empty, edit it in-place and keep unchanged valid parts.\n"
+            "9) If exact capability choice is impossible, return empty graph: {\"nodes\": [], \"edges\": []}.\n\n"
+            "MERGE_PATTERN_EXAMPLE:\n"
+            "- Step 1 produces users\n"
+            "- Step 2 produces hotels\n"
             "- Step 3 consumes users and hotels\n"
-            "Тогда обязательно:\n"
-            '- edges: (1->3, type="users"), (2->3, type="hotels")\n'
+            "Expected edges:\n"
+            '- (1->3, type=\"users\"), (2->3, type=\"hotels\")\n'
+            "Expected links:\n"
             "- node[3].input_connected_from = [1,2]\n"
-            "- node[1].output_connected_to содержит 3\n"
-            "- node[2].output_connected_to содержит 3"
+            "- node[1].output_connected_to contains 3\n"
+            "- node[2].output_connected_to contains 3"
         )
 
         return (
             f"{instruction}\n\n"
             f"USER_QUERY:\n{user_query}\n\n"
             f"DIALOG_CONTEXT:\n{json.dumps(context_payload, ensure_ascii=False)}\n\n"
+            f"ALLOWED_CAPABILITY_IDS:\n{json.dumps(allowed_capability_ids, ensure_ascii=False)}\n\n"
             f"CAPABILITIES:\n{json.dumps(capabilities_payload, ensure_ascii=False)}\n\n"
             "OUTPUT_SCHEMA:\n"
             "{\n"
@@ -436,9 +430,10 @@ class PipelineService:
             "  ]\n"
             "}\n\n"
             "SELF-CHECK (INTERNAL ONLY):\n"
-            "- Сначала forward-путь, потом backward-валидация от последнего шага.\n"
-            "- Если есть рассинхрон edges vs node links — исправь до ответа.\n"
-            "- В ответ выводи только итоговый JSON.\n"
+            "- Verify every node.capability_id is in ALLOWED_CAPABILITY_IDS.\n"
+            "- Verify every required input has either upstream edge or external_inputs.\n"
+            "- Verify edges and node links are synchronized.\n"
+            "- Output final JSON only.\n"
         )
 
     def _build_selection_query(
@@ -1084,13 +1079,14 @@ class PipelineService:
         ]
 
         review_prompt = (
-            "Проверь граф пайплайна и верни только JSON.\n"
-            "Не используй внешний контекст. Используй только GRAPH и CAPABILITIES.\n\n"
-            "Сделай обратную проверку от финального шага к источникам.\n"
-            "Удали висящие узлы и рёбра, которые не участвуют в достижении финального шага.\n"
-            "Не придумывай новые шаги. Разрешено только удалить лишнее или исправить связи.\n"
-            "Сохрани DAG.\n\n"
-            "Ответ строго в формате:\n"
+            "ROLE: Graph reviewer for qwen2.5:7b-coder.\n"
+            "INPUT: GRAPH and CAPABILITIES only.\n"
+            "TASK: Keep executable DAG, remove dead branches, and fix edges.\n"
+            "CONSTRAINTS:\n"
+            "- Do not invent new steps.\n"
+            "- Keep only steps that contribute to final goal.\n"
+            "- Return JSON only.\n\n"
+            "OUTPUT_FORMAT:\n"
             "{\n"
             "  \"keep_steps\": [1,2,3],\n"
             "  \"edges\": [\n"
@@ -1101,8 +1097,8 @@ class PipelineService:
             f"GRAPH:\n{json.dumps({'nodes': nodes, 'edges': edges}, ensure_ascii=False)}"
         )
         system_prompt = (
-            "You validate pipeline graph connectivity and sequencing. "
-            "Return ONLY valid JSON."
+            "You validate workflow graph connectivity for qwen2.5-coder. "
+            "Return ONLY one valid JSON object."
         )
 
         try:
