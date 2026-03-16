@@ -3,6 +3,7 @@ import asyncio
 import os
 import uuid
 from contextlib import asynccontextmanager
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
@@ -139,3 +140,6 @@ if all(
     app.include_router(update_user_router, prefix="/api/users")
     app.include_router(update_password_router, prefix="/api/users")
     app.include_router(delete_user_router, prefix="/api/users")
+
+
+Instrumentator().instrument(app).expose(app)

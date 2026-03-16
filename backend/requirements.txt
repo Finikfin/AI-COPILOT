@@ -16,3 +16,4 @@ httpx
 email-validator
 PyYAML
 ollama
+prometheus-fastapi-instrumentator
