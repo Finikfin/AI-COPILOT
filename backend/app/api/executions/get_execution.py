@@ -3,13 +3,14 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database.session import get_session
 from app.models import ExecutionRun, ExecutionStepRun, Pipeline, User, UserRole
 from app.schemas.execution_sch import ExecutionRunDetailResponse, ExecutionStepRunResponse
+from app.utils.business_logger import log_business_event
 from app.utils.token_manager import get_current_user
 
 
@@ -83,11 +84,20 @@ def _build_step_run_response(step_run: ExecutionStepRun) -> ExecutionStepRunResp
 @router.get("/{run_id}", response_model=ExecutionRunDetailResponse)
 async def get_execution(
     run_id: UUID,
+    request: Request,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
+    trace_id = getattr(request.state, "traceId", None)
     run = await session.get(ExecutionRun, run_id)
     if run is None:
+        log_business_event(
+            "execution_fetch_rejected",
+            trace_id=trace_id,
+            user_id=str(current_user.id),
+            run_id=str(run_id),
+            reason="run_not_found",
+        )
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Execution run not found")
 
     if current_user.role != UserRole.ADMIN:
@@ -96,6 +106,14 @@ async def get_execution(
             pipeline = await session.get(Pipeline, run.pipeline_id)
             is_owner = pipeline is not None and pipeline.created_by == current_user.id
         if not is_owner:
+            log_business_event(
+                "execution_fetch_rejected",
+                trace_id=trace_id,
+                user_id=str(current_user.id),
+                run_id=str(run.id),
+                pipeline_id=str(run.pipeline_id),
+                reason="run_not_found_or_forbidden",
+            )
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Execution run not found")
 
     step_query = (
@@ -105,6 +123,16 @@ async def get_execution(
     )
     step_result = await session.execute(step_query)
     step_runs = list(step_result.scalars().all())
+
+    log_business_event(
+        "execution_fetched",
+        trace_id=trace_id,
+        user_id=str(current_user.id),
+        run_id=str(run.id),
+        pipeline_id=str(run.pipeline_id),
+        result_status=run.status.value,
+        step_count=len(step_runs),
+    )
 
     return ExecutionRunDetailResponse(
         id=run.id,

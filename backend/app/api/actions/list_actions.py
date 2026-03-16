@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database.session import get_session
 from app.models import Action, ActionIngestStatus, HttpMethod, User, UserRole
 from app.schemas.action_sch import ActionListItemResponse
+from app.utils.business_logger import log_business_event
 from app.utils.token_manager import get_current_user
 
 
@@ -17,6 +18,7 @@ router = APIRouter(tags=["Actions"])
 
 @router.get("/", response_model=list[ActionListItemResponse])
 async def list_actions(
+    request: Request,
     method: HttpMethod | None = Query(default=None),
     owner_id: UUID | None = Query(default=None),
     source_filename: str | None = Query(default=None),
@@ -26,6 +28,7 @@ async def list_actions(
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
+    trace_id = getattr(request.state, "traceId", None)
     query = (
         select(Action)
         .where(Action.is_deleted.is_(False))
@@ -58,4 +61,19 @@ async def list_actions(
         )
 
     result = await session.execute(query)
-    return result.scalars().all()
+    actions = list(result.scalars().all())
+
+    log_business_event(
+        "actions_listed",
+        trace_id=trace_id,
+        user_id=str(current_user.id),
+        method=method.value if method is not None else None,
+        owner_id=str(owner_id) if owner_id is not None else None,
+        source_filename=source_filename,
+        search=search,
+        limit=limit,
+        offset=offset,
+        result_count=len(actions),
+    )
+
+    return actions
