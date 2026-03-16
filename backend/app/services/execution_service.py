@@ -26,6 +26,7 @@ from app.models import (
     PipelineStatus,
 )
 from app.models.capability import CapabilityType
+from app.utils.business_logger import log_business_event
 
 
 class ExecutionServiceError(Exception):
@@ -123,6 +124,13 @@ class ExecutionService:
         await self.session.refresh(run)
 
         await self.context_store.save_context(run.id, self._build_empty_context())
+        log_business_event(
+            "execution_run_queued",
+            run_id=str(run.id),
+            pipeline_id=str(run.pipeline_id),
+            user_id=str(initiated_by) if initiated_by is not None else None,
+            inputs_count=len(run.inputs or {}),
+        )
         return run
 
     @classmethod
@@ -140,6 +148,11 @@ class ExecutionService:
     async def execute_run(self, run_id: uuid.UUID) -> None:
         run = await self.session.get(ExecutionRun, run_id)
         if run is None:
+            log_business_event(
+                "execution_run_rejected",
+                run_id=str(run_id),
+                reason="run_not_found",
+            )
             raise ExecutionServiceError("Execution run not found")
 
         pipeline = await self.session.get(Pipeline, run.pipeline_id)
@@ -148,6 +161,12 @@ class ExecutionService:
             run.error = "Pipeline not found"
             run.finished_at = self._now_utc()
             await self.session.commit()
+            log_business_event(
+                "execution_run_failed",
+                run_id=str(run.id),
+                pipeline_id=str(run.pipeline_id),
+                reason="pipeline_not_found",
+            )
             return
 
         try:
@@ -160,6 +179,13 @@ class ExecutionService:
             run.error = f"Invalid pipeline graph: {exc}"
             run.finished_at = self._now_utc()
             await self.session.commit()
+            log_business_event(
+                "execution_run_failed",
+                run_id=str(run.id),
+                pipeline_id=str(run.pipeline_id),
+                reason="invalid_pipeline_graph",
+                details=str(exc),
+            )
             return
 
         run.status = ExecutionRunStatus.RUNNING
@@ -167,6 +193,13 @@ class ExecutionService:
         run.error = None
         run.summary = None
         await self.session.commit()
+        log_business_event(
+            "execution_run_started",
+            run_id=str(run.id),
+            pipeline_id=str(run.pipeline_id),
+            user_id=str(run.initiated_by) if run.initiated_by is not None else None,
+            total_steps=len(ordered_steps),
+        )
 
         context = await self.context_store.load_context(run.id)
         context = self._normalize_context(context)
@@ -266,6 +299,13 @@ class ExecutionService:
                     response_snapshot=exc.response_snapshot,
                     error=str(exc),
                 )
+                log_business_event(
+                    "execution_step_failed",
+                    run_id=str(run.id),
+                    pipeline_id=str(run.pipeline_id),
+                    step=step,
+                    reason=str(exc),
+                )
 
                 status_by_step[step] = ExecutionStepStatus.FAILED
                 failed_count += 1
@@ -286,6 +326,13 @@ class ExecutionService:
                         "error_type": type(exc).__name__,
                     },
                     error=f"Unhandled step error: {exc}",
+                )
+                log_business_event(
+                    "execution_step_failed",
+                    run_id=str(run.id),
+                    pipeline_id=str(run.pipeline_id),
+                    step=step,
+                    reason=f"Unhandled step error: {exc}",
                 )
 
                 status_by_step[step] = ExecutionStepStatus.FAILED
@@ -320,6 +367,17 @@ class ExecutionService:
             run.error = "Execution failed"
 
         await self.session.commit()
+        log_business_event(
+            "execution_run_finished",
+            run_id=str(run.id),
+            pipeline_id=str(run.pipeline_id),
+            user_id=str(run.initiated_by) if run.initiated_by is not None else None,
+            result_status=run.status.value,
+            total_steps=len(ordered_steps),
+            succeeded_steps=succeeded_count,
+            failed_steps=failed_count,
+            skipped_steps=skipped_count,
+        )
 
     async def _finalize_step_run(
         self,

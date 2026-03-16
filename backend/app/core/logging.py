@@ -7,6 +7,32 @@ from datetime import datetime, timezone
 from typing import Any
 
 
+LOG_RECORD_RESERVED_FIELDS = set(
+    logging.LogRecord(
+        name="",
+        level=0,
+        pathname="",
+        lineno=0,
+        msg="",
+        args=(),
+        exc_info=None,
+    ).__dict__.keys()
+) | {"message", "asctime"}
+
+
+def _normalize_extra_value(value: Any) -> Any:
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, (list, tuple)):
+        return [_normalize_extra_value(item) for item in value]
+    if isinstance(value, dict):
+        normalized: dict[str, Any] = {}
+        for key, nested_value in value.items():
+            normalized[str(key)] = _normalize_extra_value(nested_value)
+        return normalized
+    return str(value)
+
+
 class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         payload: dict[str, Any] = {
@@ -37,6 +63,11 @@ class JsonFormatter(logging.Formatter):
             value = getattr(record, key, None)
             if value is not None:
                 payload[key] = value
+
+        for key, value in record.__dict__.items():
+            if key in LOG_RECORD_RESERVED_FIELDS or key in payload:
+                continue
+            payload[key] = _normalize_extra_value(value)
 
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)

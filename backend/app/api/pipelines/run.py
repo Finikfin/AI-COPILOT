@@ -55,6 +55,13 @@ async def run_pipeline(
         )
     except ExecutionServiceError as exc:
         message = str(exc)
+        log_business_event(
+            "pipeline_run_rejected",
+            trace_id=trace_id,
+            user_id=str(current_user.id),
+            pipeline_id=str(pipeline_id),
+            reason=message,
+        )
         if "not found" in message.lower():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=message) from exc
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message) from exc
@@ -66,6 +73,7 @@ async def run_pipeline(
         user_id=str(current_user.id),
         pipeline_id=str(run.pipeline_id),
         run_id=str(run.id),
+        inputs_count=len(payload.inputs or {}),
     )
 
     return RunPipelineResponse(
