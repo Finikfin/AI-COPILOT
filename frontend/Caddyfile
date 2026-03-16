@@ -4,5 +4,17 @@ team-29-main2-8f6819.pages.prodcontest.ru {
   @api path /api/* /docs* /redoc* /openapi.json*
   reverse_proxy @api api:8000
 
+  @actions_no_slash path /api/v1/actions
+  rewrite @actions_no_slash /api/v1/actions/
+
+  @capabilities_no_slash path /api/v1/capabilities
+  rewrite @capabilities_no_slash /api/v1/capabilities/
+
+  @executions_no_slash path /api/v1/executions
+  rewrite @executions_no_slash /api/v1/executions/
+
+  @users_no_slash path /api/users
+  rewrite @users_no_slash /api/users/
+
   reverse_proxy web:80
 }
