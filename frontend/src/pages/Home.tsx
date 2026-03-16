@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { FileJson, Send, Sparkles, Wand2, Shield, Zap } from 'lucide-react';
+import { FileJson, Send, Sparkles, Wand2, Shield, Zap, Download } from 'lucide-react';
 import { SwaggerImportModal } from '@/components/shared/SwaggerImportModal';
 import { ImportResultsModal } from '@/components/shared/ImportResultsModal';
 import { useNavigate } from 'react-router-dom';
@@ -138,6 +138,19 @@ const Home: React.FC = () => {
             >
               <FileJson className="h-4 w-4 text-primary" />
               Import Swagger
+            </Button>
+            <Button
+              variant="outline"
+              className="gap-2 border-border bg-card/50 backdrop-blur-sm hover:bg-accent transition-all animate-in fade-in zoom-in duration-500 delay-350"
+              asChild
+            >
+              <a 
+                href="https://gitlab.prodcontest.com/team-29/backend/-/raw/master/result.yaml?ref_type=heads&inline=false" 
+                download="swagger.yaml"
+              >
+                <Download className="h-4 w-4 text-primary" />
+                Download base swagger
+              </a>
             </Button>
           </div>
         </div>
