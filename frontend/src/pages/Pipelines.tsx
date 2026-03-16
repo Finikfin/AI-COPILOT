@@ -270,6 +270,164 @@ export const formatPayload = (payload: unknown): string => {
   }
 };
 
+const MAX_PAYLOAD_PREVIEW_ITEMS = 6;
+const MAX_PAYLOAD_DEPTH = 3;
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const formatFieldLabel = (field: string): string => {
+  const normalized = field
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .trim();
+  if (!normalized) {
+    return 'Поле';
+  }
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+};
+
+const toInlineValue = (value: unknown): string => {
+  if (value === null || value === undefined) {
+    return 'нет данных';
+  }
+  if (typeof value === 'string') {
+    return value.trim() ? value : 'пустая строка';
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    return `${value.length} элементов`;
+  }
+  if (isPlainObject(value)) {
+    const keys = Object.keys(value);
+    if (keys.length === 0) {
+      return 'пустой объект';
+    }
+    const preview = keys.slice(0, 3).join(', ');
+    return keys.length > 3 ? `объект: ${preview}, ...` : `объект: ${preview}`;
+  }
+  return String(value);
+};
+
+const renderPayloadNode = (payload: unknown, depth = 0): React.ReactNode => {
+  if (depth >= MAX_PAYLOAD_DEPTH) {
+    return (
+      <span className="inline-flex rounded border border-border bg-background px-1.5 py-0.5 text-[11px]">
+        {toInlineValue(payload)}
+      </span>
+    );
+  }
+
+  if (payload === null || payload === undefined) {
+    return <span className="text-muted-foreground">нет данных</span>;
+  }
+
+  if (typeof payload === 'string' || typeof payload === 'number' || typeof payload === 'boolean') {
+    return (
+      <span className="inline-flex rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[11px] text-foreground">
+        {toInlineValue(payload)}
+      </span>
+    );
+  }
+
+  if (Array.isArray(payload)) {
+    if (payload.length === 0) {
+      return <span className="text-muted-foreground">пустой список</span>;
+    }
+
+    const visibleItems = payload.slice(0, MAX_PAYLOAD_PREVIEW_ITEMS);
+    const primitivesOnly = visibleItems.every(
+      (item) =>
+        item === null ||
+        item === undefined ||
+        typeof item === 'string' ||
+        typeof item === 'number' ||
+        typeof item === 'boolean'
+    );
+
+    if (primitivesOnly) {
+      return (
+        <div className="flex flex-wrap gap-1">
+          {visibleItems.map((item, index) => (
+            <span
+              key={`${index}-${String(item)}`}
+              className="inline-flex rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[11px]"
+            >
+              {toInlineValue(item)}
+            </span>
+          ))}
+          {payload.length > visibleItems.length && (
+            <span className="text-[11px] text-muted-foreground">
+              +{payload.length - visibleItems.length}
+            </span>
+          )}
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-1.5">
+        {visibleItems.map((item, index) => (
+          <div key={index} className="rounded-md border border-border/70 bg-background/60 p-2">
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Элемент {index + 1}
+            </p>
+            {renderPayloadNode(item, depth + 1)}
+          </div>
+        ))}
+        {payload.length > visibleItems.length && (
+          <p className="text-[11px] text-muted-foreground">
+            +{payload.length - visibleItems.length} элементов
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  if (isPlainObject(payload)) {
+    const entries = Object.entries(payload);
+    if (entries.length === 0) {
+      return <span className="text-muted-foreground">пустой объект</span>;
+    }
+
+    const visibleEntries = entries.slice(0, MAX_PAYLOAD_PREVIEW_ITEMS);
+    return (
+      <div className="space-y-1.5">
+        {visibleEntries.map(([key, value]) => (
+          <div
+            key={key}
+            className="grid grid-cols-[96px_minmax(0,1fr)] gap-2 rounded-md border border-border/70 bg-background/60 p-2"
+          >
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground break-words">
+              {formatFieldLabel(key)}
+            </p>
+            <div className="min-w-0 break-words">{renderPayloadNode(value, depth + 1)}</div>
+          </div>
+        ))}
+        {entries.length > visibleEntries.length && (
+          <p className="text-[11px] text-muted-foreground">
+            +{entries.length - visibleEntries.length} полей
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <span className="inline-flex rounded border border-border bg-background px-1.5 py-0.5 text-[11px]">
+      {String(payload)}
+    </span>
+  );
+};
+
+const PayloadPreview: React.FC<{ payload: unknown }> = ({ payload }) => (
+  <div className="max-h-44 overflow-auto rounded-md border border-border bg-muted/30 p-2 text-[11px] leading-relaxed text-foreground">
+    {renderPayloadNode(payload)}
+  </div>
+);
+
 export const Pipelines: React.FC = () => {
   const location = useLocation();
   const { currentPipeline } = usePipelineContext();
@@ -602,9 +760,7 @@ export const Pipelines: React.FC = () => {
                                 <p className="text-[10px] font-semibold text-foreground uppercase tracking-wider">
                                   Принял
                                 </p>
-                                <pre className="max-h-44 overflow-auto rounded-md border border-border bg-muted/30 p-2 text-[11px] leading-relaxed text-foreground whitespace-pre-wrap break-words">
-                                  {formatPayload(stepRun.accepted_payload)}
-                                </pre>
+                                <PayloadPreview payload={stepRun.accepted_payload} />
                               </div>
                             )}
 
@@ -613,9 +769,7 @@ export const Pipelines: React.FC = () => {
                                 <p className="text-[10px] font-semibold text-foreground uppercase tracking-wider">
                                   Вернул
                                 </p>
-                                <pre className="max-h-44 overflow-auto rounded-md border border-border bg-muted/30 p-2 text-[11px] leading-relaxed text-foreground whitespace-pre-wrap break-words">
-                                  {formatPayload(stepRun.output_payload)}
-                                </pre>
+                                <PayloadPreview payload={stepRun.output_payload} />
                               </div>
                             )}
 
