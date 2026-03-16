@@ -1,3 +1,39 @@
+# ML Core Swagger (Сдача)
+
+Актуальный сдаваемый Swagger для ML core backend лежит в файле:
+
+- `docs/ml_core_backend_openapi.yaml`
+
+Что входит в документ:
+
+- `POST /api/v1/pipelines/generate`
+- `GET /api/v1/pipelines/dialogs`
+- `GET /api/v1/pipelines/dialogs/{dialog_id}/history`
+- `POST /api/v1/pipelines/dialog/reset`
+- `POST /api/v1/pipelines/{pipeline_id}/run`
+- `GET /api/v1/executions`
+- `GET /api/v1/executions/{run_id}`
+
+Что не входит в этот документ:
+
+- auth, actions, capabilities ручки
+- demo `/ml/*` ручки из `demo-backend/openapi/*`
+
+Быстрая проверка локально:
+
+```bash
+cd backend
+pytest -s --capture=no tests/test_ml_openapi_contract.py
+```
+
+Дополнительная валидация OpenAPI (если установлен валидатор):
+
+```bash
+python3 -m openapi_spec_validator docs/ml_core_backend_openapi.yaml
+```
+
+---
+
 # AI Copilot
 ## Core Concept
     Главная задача проекта: Трансформация статической документации API в автономную интеллектуальную систему. Пользователь предоставляет набор OpenAPI файлов и бизнес-логику, которую он хочет получить, чтобы протестировать, а система незамедлительно проектирует и исполняет готовые Pipelines для решения задачи.

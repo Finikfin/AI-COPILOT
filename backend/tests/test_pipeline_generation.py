@@ -136,6 +136,58 @@ def test_sync_node_connections_from_edges_overrides_stale_links():
     assert nodes[2]["input_connected_from"] == [1, 2]
 
 
+def test_compact_step_sequence_remaps_gapped_steps_and_refs():
+    service = _build_service()
+
+    nodes = [
+        {
+            "step": 1,
+            "input_connected_from": [],
+            "output_connected_to": [3],
+            "input_data_type_from_previous": [],
+            "external_inputs": [],
+            "endpoints": [],
+        },
+        {
+            "step": 3,
+            "input_connected_from": [1],
+            "output_connected_to": [5],
+            "input_data_type_from_previous": [{"from_step": 1, "type": "users"}],
+            "external_inputs": [],
+            "endpoints": [],
+        },
+        {
+            "step": 5,
+            "input_connected_from": [3],
+            "output_connected_to": [],
+            "input_data_type_from_previous": [{"from_step": 3, "type": "segments"}],
+            "external_inputs": [],
+            "endpoints": [],
+        },
+    ]
+    edges = [
+        {"from_step": 1, "to_step": 3, "type": "users"},
+        {"from_step": 3, "to_step": 5, "type": "segments"},
+    ]
+
+    compact_nodes, compact_edges = service._compact_step_sequence(nodes, edges)
+
+    assert [item["step"] for item in compact_nodes] == [1, 2, 3]
+    assert compact_edges == [
+        {"from_step": 1, "to_step": 2, "type": "users"},
+        {"from_step": 2, "to_step": 3, "type": "segments"},
+    ]
+    assert compact_nodes[1]["input_connected_from"] == [1]
+    assert compact_nodes[1]["output_connected_to"] == [3]
+    assert compact_nodes[1]["input_data_type_from_previous"] == [
+        {"from_step": 1, "type": "users"}
+    ]
+    assert compact_nodes[2]["input_connected_from"] == [2]
+    assert compact_nodes[2]["input_data_type_from_previous"] == [
+        {"from_step": 2, "type": "segments"}
+    ]
+
+
 def test_build_generation_prompt_contains_qwen_coder_contract():
     service = _build_service()
     capability = _build_capability()

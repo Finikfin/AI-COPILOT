@@ -1,0 +1,944 @@
+openapi: 3.0.3
+info:
+  title: AI Copilot ML Core Backend API
+  version: 1.0.0
+  description: |
+    Сдаваемая спецификация ML core части реального backend.
+    Источник истины: текущие роуты FastAPI `/api/v1/pipelines*` и `/api/v1/executions*`.
+    Документ не включает auth/actions/capabilities endpoint'ы, кроме использования JWT bearer security.
+servers:
+  - url: http://localhost:8000
+tags:
+  - name: Pipelines
+    description: Генерация и управление pipeline-диалогом, запуск выполнения.
+  - name: Executions
+    description: История и детали запусков pipeline.
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/pipelines/generate:
+    post:
+      tags: [Pipelines]
+      operationId: generatePipeline
+      summary: Сгенерировать pipeline по сообщению пользователя
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PipelineGenerateRequest"
+            examples:
+              travel_offer_case:
+                summary: Travel-offer бизнес-задача
+                value:
+                  dialog_id: "11111111-1111-1111-1111-111111111111"
+                  message: "Сформируй и запусти рассылку тревел-офферов для активных пользователей за последние 7 дней, подбери топ-5 отелей в Берлине, сегментируй пользователей и отправь персональные email по шаблону offer_template_2026."
+                  capability_ids: null
+      responses:
+        "200":
+          description: Pipeline обработан (готов / требует ввод / не может быть собран)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PipelineGenerateResponse"
+              examples:
+                ready:
+                  summary: Линейный pipeline 1 -> 2 -> 3 -> 4 -> 5
+                  value:
+                    status: "ready"
+                    message_ru: "Пайплайн собран. Можно запускать."
+                    chat_reply_ru: "Пайплайн собран: получаем пользователей и отели, сегментируем, назначаем офферы, затем отправляем email."
+                    pipeline_id: "7b17ac70-3f39-4e70-8f8a-4a2f1fd4ff7e"
+                    nodes:
+                      - step: 1
+                        name: "get_recent_users"
+                        description: "Получить активных пользователей за последние 7 дней."
+                        input_connected_from: []
+                        output_connected_to: [3]
+                        input_data_type_from_previous: []
+                        external_inputs: ["days_back"]
+                        endpoints:
+                          - name: "get_recent_users"
+                            capability_id: "c4be1e66-2e04-4c6f-8d8f-6f39f1f46087"
+                            action_id: "e4b0bcb6-6a8c-4b0a-8e18-3f44b5f7d1c2"
+                            output_type: "users[]"
+                      - step: 2
+                        name: "get_top_hotels"
+                        description: "Получить топ-5 отелей в Берлине."
+                        input_connected_from: []
+                        output_connected_to: [3]
+                        input_data_type_from_previous: []
+                        external_inputs: ["city", "hotels_limit"]
+                        endpoints:
+                          - name: "get_top_hotels"
+                            capability_id: "470ae37e-029e-4c67-a293-acb848675d0b"
+                            action_id: "96f0bc8f-e294-46a9-9a0e-48e1b8f2a941"
+                            output_type: "hotels[]"
+                      - step: 3
+                        name: "segment_users_by_hotel_preferences"
+                        description: "Сегментация пользователей по предпочтениям."
+                        input_connected_from: [1, 2]
+                        output_connected_to: [4]
+                        input_data_type_from_previous:
+                          - from_step: 1
+                            type: "users[]"
+                          - from_step: 2
+                            type: "hotels[]"
+                        external_inputs: []
+                        endpoints:
+                          - name: "segment_users_by_hotel_preferences"
+                            capability_id: "518ea04f-f891-4529-8c74-06e8cd9d2f43"
+                            action_id: "92dfce86-34dd-4c1d-9ee7-4214a16cbd99"
+                            output_type: "segments[]"
+                      - step: 4
+                        name: "assign_users_to_hotels"
+                        description: "Назначить пользователю релевантный отель."
+                        input_connected_from: [3]
+                        output_connected_to: [5]
+                        input_data_type_from_previous:
+                          - from_step: 3
+                            type: "segments[]"
+                        external_inputs: []
+                        endpoints:
+                          - name: "assign_users_to_hotels"
+                            capability_id: "70c67642-c8d2-4eb2-a57b-d5e42dc04342"
+                            action_id: "c57f4c88-7307-4e2c-9d36-6756be8e6ab0"
+                            output_type: "assignments[]"
+                      - step: 5
+                        name: "send_hotel_offers_by_email"
+                        description: "Отправить персональные email-офферы."
+                        input_connected_from: [4]
+                        output_connected_to: []
+                        input_data_type_from_previous:
+                          - from_step: 4
+                            type: "assignments[]"
+                        external_inputs: ["template_id"]
+                        endpoints:
+                          - name: "send_hotel_offers_by_email"
+                            capability_id: "3b90595e-3f6f-4b4a-a89a-63daecf8ed03"
+                            action_id: "3c97cc71-5cf6-45fd-8f75-2cf1ccfc7c45"
+                            output_type: "delivery_report"
+                    edges:
+                      - from_step: 1
+                        to_step: 3
+                        type: "data_dependency"
+                      - from_step: 2
+                        to_step: 3
+                        type: "data_dependency"
+                      - from_step: 3
+                        to_step: 4
+                        type: "data_dependency"
+                      - from_step: 4
+                        to_step: 5
+                        type: "data_dependency"
+                    missing_requirements: []
+                    context_summary: "Используются 5 capability для travel-рассылки."
+                needs_input:
+                  summary: Требуется один уточняющий параметр
+                  value:
+                    status: "needs_input"
+                    message_ru: "Уточните template_id для email-рассылки."
+                    chat_reply_ru: "Нужен template_id для шага отправки email. Например: offer_template_2026."
+                    pipeline_id: null
+                    nodes: []
+                    edges: []
+                    missing_requirements: ["template_id"]
+                    context_summary: null
+                cannot_build:
+                  summary: Модель недоступна
+                  value:
+                    status: "cannot_build"
+                    message_ru: "Не удалось обратиться к локальной модели Ollama. Проверьте OLLAMA_HOST/OLLAMA_MODEL и повторите запрос."
+                    chat_reply_ru: "Не удалось обратиться к локальной модели Ollama. Проверьте OLLAMA_HOST/OLLAMA_MODEL и повторите запрос."
+                    pipeline_id: null
+                    nodes: []
+                    edges: []
+                    missing_requirements: ["ollama_unavailable"]
+                    context_summary: null
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /api/v1/pipelines/dialogs:
+    get:
+      tags: [Pipelines]
+      operationId: listPipelineDialogs
+      summary: Получить список диалогов pipeline
+      parameters:
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 20
+        - in: query
+          name: offset
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: Список диалогов пользователя
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PipelineDialogListItemResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /api/v1/pipelines/dialogs/{dialog_id}/history:
+    get:
+      tags: [Pipelines]
+      operationId: getPipelineDialogHistory
+      summary: Получить историю сообщений диалога
+      parameters:
+        - in: path
+          name: dialog_id
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 30
+        - in: query
+          name: offset
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: История диалога
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PipelineDialogHistoryResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /api/v1/pipelines/dialog/reset:
+    post:
+      tags: [Pipelines]
+      operationId: resetPipelineDialog
+      summary: Сбросить контекст диалога pipeline
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DialogResetRequest"
+      responses:
+        "200":
+          description: Диалог успешно сброшен
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DialogResetResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /api/v1/pipelines/{pipeline_id}/run:
+    post:
+      tags: [Pipelines]
+      operationId: runPipeline
+      summary: Запустить pipeline на выполнение
+      parameters:
+        - in: path
+          name: pipeline_id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunPipelineRequest"
+            examples:
+              travel_inputs:
+                value:
+                  inputs:
+                    days_back: 7
+                    city: "Berlin"
+                    hotels_limit: 5
+                    template_id: "offer_template_2026"
+      responses:
+        "202":
+          description: Запуск поставлен в очередь/начат
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunPipelineResponse"
+              examples:
+                queued:
+                  value:
+                    run_id: "2fb1f647-b769-4f56-8a44-6a63a364b478"
+                    pipeline_id: "7b17ac70-3f39-4e70-8f8a-4a2f1fd4ff7e"
+                    status: "QUEUED"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /api/v1/executions:
+    get:
+      tags: [Executions]
+      operationId: listExecutions
+      summary: Получить список запусков execution
+      parameters:
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - in: query
+          name: offset
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: Список запусков
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ExecutionRunListItemResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /api/v1/executions/{run_id}:
+    get:
+      tags: [Executions]
+      operationId: getExecution
+      summary: Получить детальный отчёт execution run
+      parameters:
+        - in: path
+          name: run_id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Детали запуска с шагами
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExecutionRunDetailResponse"
+              examples:
+                partial_failed:
+                  summary: Пример со статусами SUCCEEDED/FAILED/SKIPPED
+                  value:
+                    id: "2fb1f647-b769-4f56-8a44-6a63a364b478"
+                    pipeline_id: "7b17ac70-3f39-4e70-8f8a-4a2f1fd4ff7e"
+                    status: "PARTIAL_FAILED"
+                    inputs:
+                      days_back: 7
+                      city: "Berlin"
+                      hotels_limit: 5
+                      template_id: "offer_template_2026"
+                    summary:
+                      total_steps: 5
+                      succeeded: 3
+                      failed: 1
+                      skipped: 1
+                    error: "Step 4 failed: upstream service timeout"
+                    started_at: "2026-03-16T12:10:15Z"
+                    finished_at: "2026-03-16T12:10:31Z"
+                    created_at: "2026-03-16T12:10:15Z"
+                    updated_at: "2026-03-16T12:10:31Z"
+                    steps:
+                      - step: 1
+                        name: "get_recent_users"
+                        capability_id: "c4be1e66-2e04-4c6f-8d8f-6f39f1f46087"
+                        action_id: "e4b0bcb6-6a8c-4b0a-8e18-3f44b5f7d1c2"
+                        method: "GET"
+                        status_code: 200
+                        status: "SUCCEEDED"
+                        resolved_inputs:
+                          days_back: 7
+                        accepted_payload: null
+                        output_payload:
+                          users: []
+                        request_snapshot:
+                          method: "GET"
+                          path: "/users/recent"
+                        response_snapshot:
+                          status_code: 200
+                          body:
+                            users: []
+                        error: null
+                        started_at: "2026-03-16T12:10:15Z"
+                        finished_at: "2026-03-16T12:10:17Z"
+                        duration_ms: 2100
+                        created_at: "2026-03-16T12:10:15Z"
+                        updated_at: "2026-03-16T12:10:17Z"
+                      - step: 4
+                        name: "assign_users_to_hotels"
+                        capability_id: "70c67642-c8d2-4eb2-a57b-d5e42dc04342"
+                        action_id: "c57f4c88-7307-4e2c-9d36-6756be8e6ab0"
+                        method: "POST"
+                        status_code: 504
+                        status: "FAILED"
+                        resolved_inputs:
+                          segments: []
+                        accepted_payload:
+                          segments: []
+                        output_payload:
+                          detail: "Gateway Timeout"
+                        request_snapshot:
+                          method: "POST"
+                          path: "/assignments/hotels"
+                          json_body:
+                            segments: []
+                        response_snapshot:
+                          status_code: 504
+                          body:
+                            detail: "Gateway Timeout"
+                        error: "Upstream timeout"
+                        started_at: "2026-03-16T12:10:23Z"
+                        finished_at: "2026-03-16T12:10:29Z"
+                        duration_ms: 6010
+                        created_at: "2026-03-16T12:10:23Z"
+                        updated_at: "2026-03-16T12:10:29Z"
+                      - step: 5
+                        name: "send_hotel_offers_by_email"
+                        capability_id: "3b90595e-3f6f-4b4a-a89a-63daecf8ed03"
+                        action_id: "3c97cc71-5cf6-45fd-8f75-2cf1ccfc7c45"
+                        method: null
+                        status_code: null
+                        status: "SKIPPED"
+                        resolved_inputs: null
+                        accepted_payload: null
+                        output_payload: null
+                        request_snapshot: null
+                        response_snapshot: null
+                        error: "Skipped: run stopped after failure at step 4"
+                        started_at: null
+                        finished_at: null
+                        duration_ms: null
+                        created_at: "2026-03-16T12:10:29Z"
+                        updated_at: "2026-03-16T12:10:29Z"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    BadRequestError:
+      description: Некорректный запрос
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            not_ready:
+              value:
+                detail: "Pipeline is not ready for execution"
+    UnauthorizedError:
+      description: Не передан или некорректен JWT токен
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            invalid_credentials:
+              value:
+                detail: "Could not validate credentials"
+    ForbiddenError:
+      description: Нет доступа к ресурсу диалога
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            dialog_denied:
+              value:
+                detail: "Access denied for dialog"
+    NotFoundError:
+      description: Сущность не найдена
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            not_found:
+              value:
+                detail: "Pipeline not found"
+    ValidationError:
+      description: Ошибка валидации входных данных
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/HTTPValidationError"
+
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        detail:
+          oneOf:
+            - type: string
+            - type: object
+              additionalProperties: true
+            - type: array
+              items:
+                type: object
+                additionalProperties: true
+
+    ValidationError:
+      type: object
+      required: [loc, msg, type]
+      properties:
+        loc:
+          type: array
+          items:
+            oneOf:
+              - type: string
+              - type: integer
+        msg:
+          type: string
+        type:
+          type: string
+
+    HTTPValidationError:
+      type: object
+      properties:
+        detail:
+          type: array
+          items:
+            $ref: "#/components/schemas/ValidationError"
+
+    PipelineInputTypeFromPrevious:
+      type: object
+      required: [from_step, type]
+      properties:
+        from_step:
+          type: integer
+        type:
+          type: string
+
+    PipelineStepEndpoint:
+      type: object
+      required: [name, capability_id]
+      properties:
+        name:
+          type: string
+        capability_id:
+          type: string
+          format: uuid
+        action_id:
+          type: string
+          format: uuid
+          nullable: true
+        type:
+          type: string
+          nullable: true
+        input_type:
+          oneOf:
+            - type: string
+            - type: object
+              additionalProperties: true
+          nullable: true
+        output_type:
+          oneOf:
+            - type: string
+            - type: object
+              additionalProperties: true
+          nullable: true
+
+    PipelineGraphNode:
+      type: object
+      required: [step, name]
+      properties:
+        step:
+          type: integer
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        input_connected_from:
+          type: array
+          items:
+            type: integer
+          default: []
+        output_connected_to:
+          type: array
+          items:
+            type: integer
+          default: []
+        input_data_type_from_previous:
+          type: array
+          items:
+            $ref: "#/components/schemas/PipelineInputTypeFromPrevious"
+          default: []
+        external_inputs:
+          type: array
+          items:
+            type: string
+          default: []
+        endpoints:
+          type: array
+          items:
+            $ref: "#/components/schemas/PipelineStepEndpoint"
+          default: []
+
+    PipelineGraphEdge:
+      type: object
+      required: [from_step, to_step, type]
+      properties:
+        from_step:
+          type: integer
+        to_step:
+          type: integer
+        type:
+          type: string
+
+    PipelineGenerateRequest:
+      type: object
+      required: [dialog_id, message]
+      properties:
+        dialog_id:
+          type: string
+          format: uuid
+        message:
+          type: string
+          minLength: 1
+        capability_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          nullable: true
+
+    PipelineGenerateResponse:
+      type: object
+      required: [status, message_ru, chat_reply_ru, nodes, edges, missing_requirements]
+      properties:
+        status:
+          type: string
+          enum: [ready, needs_input, cannot_build]
+        message_ru:
+          type: string
+        chat_reply_ru:
+          type: string
+        pipeline_id:
+          type: string
+          format: uuid
+          nullable: true
+        nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/PipelineGraphNode"
+          default: []
+        edges:
+          type: array
+          items:
+            $ref: "#/components/schemas/PipelineGraphEdge"
+          default: []
+        missing_requirements:
+          type: array
+          items:
+            type: string
+          default: []
+        context_summary:
+          type: string
+          nullable: true
+
+    DialogResetRequest:
+      type: object
+      required: [dialog_id]
+      properties:
+        dialog_id:
+          type: string
+          format: uuid
+
+    DialogResetResponse:
+      type: object
+      required: [status, message_ru]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        message_ru:
+          type: string
+
+    PipelineDialogListItemResponse:
+      type: object
+      required: [dialog_id, created_at, updated_at]
+      properties:
+        dialog_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          nullable: true
+        last_status:
+          type: string
+          nullable: true
+        last_pipeline_id:
+          type: string
+          format: uuid
+          nullable: true
+        last_message_preview:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    PipelineDialogMessageResponse:
+      type: object
+      required: [id, role, content, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+        assistant_payload:
+          type: object
+          additionalProperties: true
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    PipelineDialogHistoryResponse:
+      type: object
+      required: [dialog_id, messages]
+      properties:
+        dialog_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          nullable: true
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/PipelineDialogMessageResponse"
+          default: []
+
+    RunPipelineRequest:
+      type: object
+      properties:
+        inputs:
+          type: object
+          additionalProperties: true
+          default: {}
+
+    RunPipelineResponse:
+      type: object
+      required: [run_id, pipeline_id, status]
+      properties:
+        run_id:
+          type: string
+          format: uuid
+        pipeline_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [QUEUED, RUNNING]
+
+    ExecutionRunListItemResponse:
+      type: object
+      required: [id, pipeline_id, status, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        pipeline_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [QUEUED, RUNNING, SUCCEEDED, FAILED, PARTIAL_FAILED]
+        error:
+          type: string
+          nullable: true
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ExecutionStepRunResponse:
+      type: object
+      required: [step, status, accepted_payload, output_payload, created_at, updated_at]
+      properties:
+        step:
+          type: integer
+        name:
+          type: string
+          nullable: true
+        capability_id:
+          type: string
+          format: uuid
+          nullable: true
+        action_id:
+          type: string
+          format: uuid
+          nullable: true
+        method:
+          type: string
+          enum: [GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS]
+          nullable: true
+        status_code:
+          type: integer
+          nullable: true
+        status:
+          type: string
+          enum: [PENDING, RUNNING, SUCCEEDED, FAILED, SKIPPED]
+        resolved_inputs:
+          type: object
+          additionalProperties: true
+          nullable: true
+        accepted_payload:
+          nullable: true
+        output_payload:
+          nullable: true
+        request_snapshot:
+          type: object
+          additionalProperties: true
+          nullable: true
+        response_snapshot:
+          type: object
+          additionalProperties: true
+          nullable: true
+        error:
+          type: string
+          nullable: true
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+        duration_ms:
+          type: integer
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ExecutionRunDetailResponse:
+      type: object
+      required: [id, pipeline_id, status, inputs, created_at, updated_at, steps]
+      properties:
+        id:
+          type: string
+          format: uuid
+        pipeline_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [QUEUED, RUNNING, SUCCEEDED, FAILED, PARTIAL_FAILED]
+        inputs:
+          type: object
+          additionalProperties: true
+          default: {}
+        summary:
+          type: object
+          additionalProperties: true
+          nullable: true
+        error:
+          type: string
+          nullable: true
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExecutionStepRunResponse"
+          default: []

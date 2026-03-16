@@ -272,6 +272,10 @@ class PipelineService:
             raw_graph, selected_capabilities
         )
         normalized_edges = self._repair_edges_with_data_flow(normalized_nodes, normalized_edges)
+        normalized_nodes, normalized_edges = self._compact_step_sequence(
+            normalized_nodes,
+            normalized_edges,
+        )
         self._sync_node_connections(normalized_nodes, normalized_edges)
         self._ensure_external_inputs(normalized_nodes, normalized_edges)
 
@@ -287,6 +291,10 @@ class PipelineService:
             reviewed_nodes,
             reviewed_edges,
         )
+        reviewed_nodes, reviewed_edges = self._compact_step_sequence(
+            reviewed_nodes,
+            reviewed_edges,
+        )
         self._sync_node_connections(reviewed_nodes, reviewed_edges)
         self._ensure_external_inputs(reviewed_nodes, reviewed_edges)
         is_ready, missing = self._validate_ready_graph(reviewed_nodes, reviewed_edges)
@@ -294,6 +302,110 @@ class PipelineService:
             missing = sorted(set(missing + normalization_issues))
             is_ready = False
         return reviewed_nodes, reviewed_edges, is_ready, missing
+
+    def _compact_step_sequence(
+        self,
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        step_values = sorted(
+            {
+                step
+                for node in nodes
+                if isinstance((step := node.get("step")), int)
+            }
+        )
+        if not step_values:
+            return nodes, edges
+
+        target = list(range(1, len(step_values) + 1))
+        if step_values == target:
+            return nodes, edges
+
+        step_map = {
+            old_step: new_step
+            for new_step, old_step in enumerate(step_values, start=1)
+        }
+
+        compact_nodes: list[dict[str, Any]] = []
+        for node in nodes:
+            step = node.get("step")
+            if not isinstance(step, int) or step not in step_map:
+                continue
+
+            compact_node = dict(node)
+            compact_node["step"] = step_map[step]
+            compact_node["input_connected_from"] = sorted(
+                {
+                    step_map[src]
+                    for src in self._normalize_int_list(node.get("input_connected_from"))
+                    if src in step_map
+                }
+            )
+            compact_node["output_connected_to"] = sorted(
+                {
+                    step_map[dst]
+                    for dst in self._normalize_int_list(node.get("output_connected_to"))
+                    if dst in step_map
+                }
+            )
+
+            compact_input_types: list[dict[str, Any]] = []
+            for item in self._normalize_input_data_types(
+                node.get("input_data_type_from_previous")
+            ):
+                from_step = item.get("from_step")
+                edge_type = item.get("type")
+                if (
+                    isinstance(from_step, int)
+                    and from_step in step_map
+                    and isinstance(edge_type, str)
+                ):
+                    compact_input_types.append(
+                        {
+                            "from_step": step_map[from_step],
+                            "type": edge_type,
+                        }
+                    )
+            compact_node["input_data_type_from_previous"] = compact_input_types
+            compact_nodes.append(compact_node)
+
+        compact_edges: list[dict[str, Any]] = []
+        seen_edges: set[tuple[int, int, str]] = set()
+        for edge in edges:
+            src = edge.get("from_step")
+            dst = edge.get("to_step")
+            edge_type = edge.get("type")
+            if (
+                not isinstance(src, int)
+                or not isinstance(dst, int)
+                or src not in step_map
+                or dst not in step_map
+                or not isinstance(edge_type, str)
+                or not edge_type.strip()
+            ):
+                continue
+            remapped = (step_map[src], step_map[dst], edge_type.strip())
+            if remapped[0] == remapped[1] or remapped in seen_edges:
+                continue
+            seen_edges.add(remapped)
+            compact_edges.append(
+                {
+                    "from_step": remapped[0],
+                    "to_step": remapped[1],
+                    "type": remapped[2],
+                }
+            )
+
+        compact_nodes.sort(key=lambda item: item.get("step", 0))
+        compact_edges.sort(
+            key=lambda item: (
+                item.get("from_step", 0),
+                item.get("to_step", 0),
+                str(item.get("type", "")),
+            )
+        )
+        return compact_nodes, compact_edges
 
     def _build_minimal_raw_graph(
         self,
