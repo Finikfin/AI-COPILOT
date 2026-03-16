@@ -8,10 +8,12 @@ import {
   Activity,
   Download,
   Play,
+  MessageSquare,
   Sparkles,
   ChevronDown,
   ChevronUp,
   Loader2,
+  X,
 } from 'lucide-react';
 import { usePipelineContext } from '@/contexts/PipelineContext';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -216,28 +218,28 @@ const getStepStatusMeta = (status: ExecutionStepStatus | undefined) => {
   if (status === 'SUCCEEDED') {
     return {
       label: 'SUCCEEDED',
-      cardClass: 'border-emerald-500/40 bg-emerald-500/5',
+      cardClass: 'border-emerald-500/40 bg-emerald-500/10',
       badgeClass: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700',
     };
   }
   if (status === 'FAILED') {
     return {
       label: 'FAILED',
-      cardClass: 'border-red-500/40 bg-red-500/5',
+      cardClass: 'border-red-500/40 bg-red-500/10',
       badgeClass: 'border-red-500/40 bg-red-500/10 text-red-700',
     };
   }
   if (status === 'RUNNING') {
     return {
       label: 'RUNNING',
-      cardClass: 'border-blue-500/40 bg-blue-500/5 ring-1 ring-blue-500/20',
+      cardClass: 'border-blue-500/40 bg-blue-500/10 ring-1 ring-blue-500/20',
       badgeClass: 'border-blue-500/40 bg-blue-500/10 text-blue-700',
     };
   }
   if (status === 'SKIPPED') {
     return {
       label: 'SKIPPED',
-      cardClass: 'border-amber-500/40 bg-amber-500/5',
+      cardClass: 'border-amber-500/40 bg-amber-500/10',
       badgeClass: 'border-amber-500/40 bg-amber-500/10 text-amber-700',
     };
   }
@@ -277,11 +279,17 @@ export const Pipelines: React.FC = () => {
   );
   const [activeRunId, setActiveRunId] = React.useState<string | null>(null);
   const [isRunStarting, setIsRunStarting] = React.useState(false);
-  const pollingTimerRef = React.useRef<ReturnType<typeof window.setInterval> | null>(
-    null
-  );
+  const pollingTimerRef = React.useRef<any>(null);
   const isPollingRequestInFlightRef = React.useRef(false);
   const notifiedTerminalStatusRef = React.useRef<ExecutionRunStatus | null>(null);
+  const [isChatVisible, setIsChatVisible] = React.useState(() => {
+    const saved = localStorage.getItem('pipelines_chat_visible');
+    return saved !== null ? saved === 'true' : true;
+  });
+
+  React.useEffect(() => {
+    localStorage.setItem('pipelines_chat_visible', String(isChatVisible));
+  }, [isChatVisible]);
 
   const initialMessage = location.state?.initialMessage;
   const dialogId = location.state?.dialogId;
@@ -484,12 +492,12 @@ export const Pipelines: React.FC = () => {
                     key={node.step}
                     layout
                     initial={false}
-                    animate={{ 
+                    animate={{
                       height: isExpanded ? 'auto' : CARD_HEIGHT,
                       zIndex: isExpanded ? 50 : 10
                     }}
                     className={cn(
-                      "absolute border border-primary/20 bg-card shadow-lg rounded-xl overflow-hidden cursor-pointer transition-colors hover:border-primary/40",
+                      "absolute border border-primary/20 bg-card/60 backdrop-blur-md shadow-lg rounded-xl overflow-hidden cursor-pointer transition-colors hover:border-primary/40",
                       stepStatusMeta.cardClass,
                       isExpanded ? "shadow-2xl ring-1 ring-primary/10" : "shadow-md"
                     )}
@@ -508,8 +516,8 @@ export const Pipelines: React.FC = () => {
                             Step {node.step}
                           </p>
                           <h3 className={cn(
-                            "mt-0.5 font-semibold text-foreground truncate transition-all",
-                            isExpanded ? "text-base" : "text-sm"
+                            "mt-0.5 font-semibold text-foreground transition-all",
+                            isExpanded ? "text-base" : "text-sm truncate"
                           )}>
                             {node.name}
                           </h3>
@@ -658,7 +666,7 @@ export const Pipelines: React.FC = () => {
             </Card>
           )}
 
-          <Card className="mt-20 p-6 bg-primary/5 border-dashed border-primary/20 space-y-6">
+          <Card className="mt-20 p-6 bg-primary/10 border-dashed border-primary/20 space-y-6">
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-4">
                 <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
@@ -776,11 +784,41 @@ export const Pipelines: React.FC = () => {
       </div>
 
       {/* Right Sidebar - AI Chat */}
-      <SynthesisChat
-        className="w-80"
-        initialMessage={initialMessage}
-        initialDialogId={dialogId}
-      />
+      <AnimatePresence mode="wait">
+        {isChatVisible ? (
+          <motion.div
+            key="chat"
+            initial={{ width: 0, opacity: 0 }}
+            animate={{ width: 320, opacity: 1 }}
+            exit={{ width: 0, opacity: 0 }}
+            transition={{ type: "spring", damping: 20, stiffness: 100 }}
+            className="flex-shrink-0"
+          >
+            <SynthesisChat
+              className="w-full h-full"
+              initialMessage={initialMessage}
+              initialDialogId={dialogId}
+              onClose={() => setIsChatVisible(false)}
+            />
+          </motion.div>
+        ) : (
+          <motion.div
+            key="toggle"
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.8 }}
+            className="fixed bottom-6 right-6 z-50"
+          >
+            <Button
+              size="icon"
+              className="h-14 w-14 rounded-full shadow-2xl bg-primary hover:bg-primary/90 text-primary-foreground group"
+              onClick={() => setIsChatVisible(true)}
+            >
+              <MessageSquare className="h-6 w-6 transition-transform group-hover:scale-110" />
+            </Button>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

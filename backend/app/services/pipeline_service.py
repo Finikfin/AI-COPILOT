@@ -271,13 +271,29 @@ class PipelineService:
         normalized_nodes, normalized_edges, normalization_issues = self._normalize_workflow(
             raw_graph, selected_capabilities
         )
+        normalized_edges = self._repair_edges_with_data_flow(normalized_nodes, normalized_edges)
         self._sync_node_connections(normalized_nodes, normalized_edges)
         self._ensure_external_inputs(normalized_nodes, normalized_edges)
-        is_ready, missing = self._validate_ready_graph(normalized_nodes, normalized_edges)
+
+        reviewed_nodes, reviewed_edges = self._review_graph_with_llm(
+            normalized_nodes,
+            normalized_edges,
+            selected_capabilities,
+        )
+        reviewed_edges = self._repair_edges_with_data_flow(reviewed_nodes, reviewed_edges)
+        reviewed_edges = self._prune_edges_for_terminal_goal(reviewed_nodes, reviewed_edges)
+        reviewed_edges = self._prune_edges_by_required_inputs(reviewed_nodes, reviewed_edges)
+        reviewed_nodes, reviewed_edges = self._prune_disconnected_nodes(
+            reviewed_nodes,
+            reviewed_edges,
+        )
+        self._sync_node_connections(reviewed_nodes, reviewed_edges)
+        self._ensure_external_inputs(reviewed_nodes, reviewed_edges)
+        is_ready, missing = self._validate_ready_graph(reviewed_nodes, reviewed_edges)
         if normalization_issues:
             missing = sorted(set(missing + normalization_issues))
             is_ready = False
-        return normalized_nodes, normalized_edges, is_ready, missing
+        return reviewed_nodes, reviewed_edges, is_ready, missing
 
     def _build_minimal_raw_graph(
         self,
@@ -286,8 +302,15 @@ class PipelineService:
         for item in selected_capabilities:
             cap = item.capability
             cap_id = getattr(cap, "id", None)
+            if cap_id is None:
+                continue
+            cap_type = self._capability_type_value(cap)
             action_id = getattr(cap, "action_id", None)
-            if cap_id is None or action_id is None:
+            if cap_type == "ATOMIC" and action_id is None:
+                continue
+            if cap_type == "COMPOSITE" and not self._recipe_is_executable(
+                getattr(cap, "recipe", None)
+            ):
                 continue
             required_inputs = self._extract_required_inputs(
                 getattr(cap, "input_schema", None)
@@ -338,19 +361,7 @@ class PipelineService:
         capabilities_payload = []
         for sc in selected_capabilities:
             cap = sc.capability
-            capabilities_payload.append(
-                {
-                    "id": str(cap.id),
-                    "action_id": str(cap.action_id),
-                    "name": cap.name,
-                    "description": cap.description,
-                    "input_type": cap.input_schema,
-                    "output_type": cap.output_schema,
-                    "required_inputs": self._extract_required_inputs(cap.input_schema),
-                    "data_format": cap.data_format,
-                    "action_context": self._extract_capability_action_context(cap),
-                }
-            )
+            capabilities_payload.append(self._build_capability_prompt_payload(cap))
 
         context_payload = {
             "summary": dialog_summary,
@@ -388,7 +399,8 @@ class PipelineService:
             "   - to_step включен в output_connected_to узла from_step\n"
             "   - from_step включен в input_connected_from узла to_step\n"
             "4) Не создавай лишних связей.\n"
-            "5) capability_id только из CAPABILITIES.\n\n"
+            "5) capability_id только из CAPABILITIES.\n"
+            "6) COMPOSITE capability — это один шаг, не разворачивай его во внутренние substeps.\n\n"
             "Пример корректного merge-паттерна:\n"
             "- Step 1 produce users\n"
             "- Step 2 produce hotels\n"
@@ -875,6 +887,62 @@ class PipelineService:
                 compact[key] = fallback.get(key)
         return compact
 
+    def _build_capability_prompt_payload(self, capability: Any) -> dict[str, Any]:
+        payload = {
+            "id": str(getattr(capability, "id", "")),
+            "action_id": str(getattr(capability, "action_id", ""))
+            if getattr(capability, "action_id", None) is not None
+            else None,
+            "type": self._capability_type_value(capability),
+            "name": getattr(capability, "name", None),
+            "description": getattr(capability, "description", None),
+            "input_type": getattr(capability, "input_schema", None),
+            "output_type": getattr(capability, "output_schema", None),
+            "required_inputs": self._extract_required_inputs(
+                getattr(capability, "input_schema", None)
+            ),
+            "data_format": getattr(capability, "data_format", None),
+            "action_context": self._extract_capability_action_context(capability),
+        }
+        recipe_summary = self._extract_recipe_summary(capability)
+        if recipe_summary is not None:
+            payload["recipe_summary"] = recipe_summary
+        return payload
+
+    def _extract_recipe_summary(self, capability: Any) -> dict[str, Any] | None:
+        llm_payload = getattr(capability, "llm_payload", None)
+        if isinstance(llm_payload, dict):
+            summary = llm_payload.get("recipe_summary")
+            if isinstance(summary, dict):
+                return summary
+
+        recipe = getattr(capability, "recipe", None)
+        if not isinstance(recipe, dict):
+            return None
+        steps = recipe.get("steps")
+        if not isinstance(steps, list):
+            return None
+        return {
+            "version": recipe.get("version"),
+            "steps_count": len(steps),
+        }
+
+    def _capability_type_value(self, capability: Any) -> str:
+        cap_type = getattr(capability, "type", None)
+        if isinstance(cap_type, str):
+            return cap_type.upper()
+        if hasattr(cap_type, "value"):
+            return str(cap_type.value).upper()
+        return "ATOMIC"
+
+    def _recipe_is_executable(self, recipe: Any) -> bool:
+        if not isinstance(recipe, dict):
+            return False
+        if recipe.get("version") != 1:
+            return False
+        steps = recipe.get("steps")
+        return isinstance(steps, list) and bool(steps)
+
     def _normalize_workflow(
         self,
         raw_graph: dict[str, Any],
@@ -930,7 +998,7 @@ class PipelineService:
                     {
                         "name": cap.name,
                         "capability_id": str(cap.id),
-                        "action_id": str(cap.action_id),
+                        "action_id": str(cap.action_id) if cap.action_id is not None else None,
                         "type": cap_type_value,
                         "input_type": cap.input_schema,
                         "output_type": cap.output_schema,
@@ -1004,16 +1072,7 @@ class PipelineService:
             return nodes, edges
 
         capabilities_payload = [
-            {
-                "id": str(sc.capability.id),
-                "action_id": str(sc.capability.action_id),
-                "name": sc.capability.name,
-                "description": sc.capability.description,
-                "required_inputs": self._extract_required_inputs(sc.capability.input_schema),
-                "input_type": sc.capability.input_schema,
-                "output_type": sc.capability.output_schema,
-                "action_context": self._extract_capability_action_context(sc.capability),
-            }
+            self._build_capability_prompt_payload(sc.capability)
             for sc in selected_capabilities
         ]
 
@@ -1237,6 +1296,9 @@ class PipelineService:
                 continue
             required_inputs = required_by_step.get(to_step, set())
             explicit_types = explicit_by_step.get(to_step, set())
+            if not required_inputs and not explicit_types:
+                filtered.append(edge)
+                continue
             if edge_type in required_inputs or edge_type in explicit_types:
                 filtered.append(edge)
         return filtered
@@ -1366,7 +1428,13 @@ class PipelineService:
                 continue
 
             for endpoint in endpoints:
-                if not endpoint.get("capability_id") or not endpoint.get("action_id"):
+                if not endpoint.get("capability_id"):
+                    missing.append(f"node_{step}: invalid_endpoint")
+                    continue
+                endpoint_type = str(endpoint.get("type") or "").upper()
+                if endpoint_type == "COMPOSITE":
+                    continue
+                if not endpoint.get("action_id"):
                     missing.append(f"node_{step}: invalid_endpoint")
 
             required_inputs = self._extract_required_inputs_from_node(node)

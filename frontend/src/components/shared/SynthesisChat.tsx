@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Bot, RotateCcw, Send, Sparkles, User } from 'lucide-react';
+import { Bot, RotateCcw, Send, Sparkles, User, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -22,6 +22,7 @@ interface Message {
 
 interface SynthesisChatProps {
   onSynthesize?: (prompt: string) => void;
+  onClose?: () => void;
   className?: string;
   initialMessage?: string;
   initialDialogId?: string;
@@ -48,6 +49,7 @@ const buildDialogStorageKey = (userId: string | undefined) =>
 
 export const SynthesisChat: React.FC<SynthesisChatProps> = ({
   onSynthesize,
+  onClose,
   className,
   initialMessage,
   initialDialogId,
@@ -304,9 +306,21 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
           <Sparkles className="h-4 w-4 text-primary" />
           <h3 className="font-semibold text-sm text-foreground">Synthesis Chat</h3>
         </div>
-        <Badge variant="outline" className="text-[10px] bg-primary/10 text-primary border-primary/20">
-          AI ASSISTANT
-        </Badge>
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" className="text-[10px] bg-primary/10 text-primary border-primary/20">
+            AI ASSISTANT
+          </Badge>
+          {onClose && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground hover:text-foreground"
+              onClick={onClose}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          )}
+        </div>
       </div>
 
       <ScrollArea className="flex-1 p-4" ref={scrollRef}>

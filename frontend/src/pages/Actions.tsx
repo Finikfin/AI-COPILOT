@@ -6,10 +6,17 @@ import {
   MoreHorizontal,
   Trash2,
   ExternalLink,
-  ChevronRight
+  ChevronRight,
+  FolderIcon
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import {
   Table,
   TableBody,
@@ -50,6 +57,15 @@ const Actions: React.FC = () => {
     filteredActions,
     addActions
   } = useActionsContext();
+
+  const groupedActions = React.useMemo(() => {
+    return filteredActions.reduce((acc, action) => {
+      const filename = action.source_filename || (action.tags && action.tags[0]) || 'General Library';
+      if (!acc[filename]) acc[filename] = [];
+      acc[filename].push(action);
+      return acc;
+    }, {} as Record<string, Action[]>);
+  }, [filteredActions]);
   
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isResultsModalOpen, setIsResultsModalOpen] = useState(false);
@@ -100,85 +116,100 @@ const Actions: React.FC = () => {
         </div>
       </div>
 
-      {/* Table Section */}
+      {/* Grouped Table Sections */}
       <div className="flex-1 rounded-xl bg-card border border-border shadow-sm overflow-hidden flex flex-col">
-        <div className="overflow-auto flex-1">
-          <Table>
-            <TableHeader className="bg-muted/50 sticky top-0 z-10">
-              <TableRow className="hover:bg-transparent border-none">
-                <TableHead className="w-[100px] text-foreground">Method</TableHead>
-                <TableHead className="text-foreground">Endpoint Path</TableHead>
-                <TableHead className="text-foreground">Category</TableHead>
-                <TableHead className="hidden md:table-cell text-foreground">Description</TableHead>
-                <TableHead className="w-[50px]"></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredActions.length > 0 ? (
-                filteredActions.map((action) => (
-                  <TableRow key={action.id} className="group border-border">
-                    <TableCell>
-                      <Badge variant="outline" className={`${getMethodColor(action.method)} font-bold`}>
-                        {action.method}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="font-mono text-sm text-foreground">
-                      {action.path}
-                    </TableCell>
-                    <TableCell>
-                      <span className="text-xs px-2 py-1 rounded-full bg-secondary text-secondary-foreground border border-border">
-                        {action.tags?.[0] || action.source_filename?.split('.')[0] || 'General'}
-                      </span>
-                    </TableCell>
-                    <TableCell className="hidden md:table-cell text-muted-foreground text-sm max-w-xs truncate">
-                      {action.summary || action.description}
-                    </TableCell>
-                    <TableCell>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-40 bg-card border-border">
-                          <DropdownMenuItem className="gap-2 cursor-pointer focus:bg-accent">
-                            <ChevronRight className="h-4 w-4" /> View Specs
-                          </DropdownMenuItem>
-                          <DropdownMenuItem className="gap-2 cursor-pointer focus:bg-accent">
-                            <ExternalLink className="h-4 w-4" /> Test API
-                          </DropdownMenuItem>
-                          <DropdownMenuItem className="gap-2 cursor-pointer text-red-500 focus:bg-red-500/10 focus:text-red-500">
-                            <Trash2 className="h-4 w-4" /> Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                ))
-              ) : (
-                <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={5} className="h-64 text-center">
-                    <div className="flex flex-col items-center justify-center py-12">
-                      <div className="bg-muted/50 p-4 rounded-full mb-4">
-                        <FileJson className="h-10 w-10 text-muted-foreground" />
-                      </div>
-                      <h3 className="text-lg font-medium text-foreground mb-1">Методы еще не загружены</h3>
-                      <p className="text-sm text-muted-foreground mb-6 max-w-xs mx-auto">
-                        Импортируйте вашу OpenAPI спецификацию, чтобы начать использовать API действия в ваших пайплайнах.
-                      </p>
-                      <Button
-                        onClick={() => setIsImportModalOpen(true)}
-                        className="gap-2"
-                      >
+        <div className="overflow-auto flex-1 p-2">
+          {Object.keys(groupedActions).length > 0 ? (
+            <Accordion type="multiple" defaultValue={Object.keys(groupedActions)} className="space-y-4">
+              {Object.entries(groupedActions).map(([filename, groupActions]) => (
+                <AccordionItem 
+                  key={filename} 
+                  value={filename}
+                  className="border border-border rounded-xl overflow-hidden bg-background/50"
+                >
+                  <AccordionTrigger className="px-4 py-3 hover:no-underline hover:bg-muted/50 transition-colors group">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 rounded-lg bg-primary/10 text-primary group-hover:scale-110 transition-transform">
                         <FileJson className="h-4 w-4" />
-                        Import Swagger
-                      </Button>
+                      </div>
+                      <div className="flex flex-col items-start gap-0.5">
+                        <span className="text-sm font-semibold text-foreground">{filename}</span>
+                        <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
+                          {groupActions.length} эндпоинтов
+                        </span>
+                      </div>
                     </div>
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
+                  </AccordionTrigger>
+                  <AccordionContent className="p-0 border-t border-border">
+                    <Table>
+                      <TableHeader className="bg-muted/30">
+                        <TableRow className="hover:bg-transparent border-none">
+                          <TableHead className="w-[100px] text-foreground h-10 py-0">Method</TableHead>
+                          <TableHead className="text-foreground h-10 py-0">Endpoint Path</TableHead>
+                          <TableHead className="hidden md:table-cell text-foreground h-10 py-0">Description</TableHead>
+                          <TableHead className="w-[50px] h-10 py-0"></TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {groupActions.map((action) => (
+                          <TableRow key={action.id} className="group border-border/50">
+                            <TableCell className="py-2">
+                              <Badge variant="outline" className={`${getMethodColor(action.method)} font-bold text-[10px] px-1.5 py-0`}>
+                                {action.method}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="font-mono text-[13px] text-foreground py-2">
+                              {action.path}
+                            </TableCell>
+                            <TableCell className="hidden md:table-cell text-muted-foreground text-[13px] max-w-xs truncate py-2">
+                              {action.summary || action.description}
+                            </TableCell>
+                            <TableCell className="py-2">
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <MoreHorizontal className="h-4 w-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" className="w-40 bg-card border-border">
+                                  <DropdownMenuItem className="gap-2 cursor-pointer focus:bg-accent text-xs">
+                                    <ChevronRight className="h-3 w-3" /> View Specs
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem className="gap-2 cursor-pointer focus:bg-accent text-xs">
+                                    <ExternalLink className="h-3 w-3" /> Test API
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem className="gap-2 cursor-pointer text-red-500 focus:bg-red-500/10 focus:text-red-500 text-xs">
+                                    <Trash2 className="h-3 w-3" /> Delete
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </AccordionContent>
+                </AccordionItem>
+              ))}
+            </Accordion>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-20 bg-background/50 m-2 rounded-xl border border-dashed border-border">
+              <div className="bg-muted/50 p-4 rounded-full mb-4">
+                <FileJson className="h-10 w-10 text-muted-foreground" />
+              </div>
+              <h3 className="text-lg font-medium text-foreground mb-1">Методы еще не загружены</h3>
+              <p className="text-sm text-muted-foreground mb-6 max-w-xs mx-auto text-center">
+                Импортируйте вашу OpenAPI спецификацию, чтобы начать использовать API действия в ваших пайплайнах.
+              </p>
+              <Button
+                onClick={() => setIsImportModalOpen(true)}
+                className="gap-2"
+              >
+                <FileJson className="h-4 w-4" />
+                Import Swagger
+              </Button>
+            </div>
+          )}
         </div>
 
         {/* Pagination Placeholder */}

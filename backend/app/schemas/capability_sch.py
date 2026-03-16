@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.action_sch import ActionIngestItemResponse
 
@@ -52,3 +52,22 @@ class ActionIngestWithCapabilitiesResponse(BaseModel):
     succeeded_actions: list[ActionIngestItemResponse]
     failed_actions: list[ActionIngestItemResponse]
     capabilities: list[CapabilityIngestItemResponse]
+
+
+class CompositeCapabilityRecipeStepCreate(BaseModel):
+    step: int = Field(ge=1)
+    capability_id: UUID
+    inputs: dict[str, str] = Field(default_factory=dict)
+
+
+class CompositeCapabilityRecipeCreate(BaseModel):
+    version: int = 1
+    steps: list[CompositeCapabilityRecipeStepCreate] = Field(default_factory=list)
+
+
+class CreateCompositeCapabilityRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    description: str | None = None
+    input_schema: dict[str, Any] | None = None
+    output_schema: dict[str, Any] | None = None
+    recipe: CompositeCapabilityRecipeCreate

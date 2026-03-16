@@ -76,19 +76,15 @@ const App = () => (
             {/* Toast notification system configuration */}
             <Toaster
               position="top-right"
-              theme="light"
+              theme="dark"
               duration={3500}
-              closeButton
               toastOptions={{
                 style: {
-                  background: '#fff',
-                  color: '#222',
-                  borderRadius: '10px',
-                  boxShadow: '0 4px 24px 0 rgba(0,0,0,0.10)',
-                  fontSize: '1rem',
-                  fontWeight: 500,
-                  border: '1px solid #e5e7eb',
-                },
+                  background: 'hsl(var(--card))',
+                  color: 'hsl(var(--foreground))',
+                  border: '1px solid hsl(var(--border))',
+                  boxShadow: '0 8px 32px 0 rgba(0, 0, 0, 0.3)',
+                }
               }}
             />
             {/* Router with basename for deployment path */}

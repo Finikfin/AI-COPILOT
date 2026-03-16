@@ -24,6 +24,7 @@ from app.models import (
     Pipeline,
     PipelineStatus,
 )
+from app.models.capability import CapabilityType
 
 
 class ExecutionServiceError(Exception):
@@ -190,9 +191,9 @@ class ExecutionService:
             await self.session.commit()
 
             try:
-                capability_id, action = await self._get_action_from_node(node)
+                capability_id, capability = await self._get_capability_from_node(node)
+                capability_type = self._capability_type_value(capability)
                 step_run.capability_id = capability_id
-                step_run.action_id = action.id
                 resolved_inputs, _missing_external = self._resolve_node_inputs(
                     node=node,
                     incoming_edges=incoming,
@@ -200,12 +201,36 @@ class ExecutionService:
                     edge_values=edge_values,
                     run_inputs=run.inputs or {},
                 )
-                request_payload = self._build_request_payload(action=action, resolved_inputs=resolved_inputs)
-                missing_required = sorted(set(request_payload["missing_required"]))
-                if missing_required:
-                    raise StepExecutionError(f"Missing inputs: {missing_required}")
+                if capability_type == CapabilityType.COMPOSITE.value:
+                    request_payload = {
+                        "resolved_inputs": resolved_inputs,
+                        "request_snapshot": {
+                            "capability_type": capability_type,
+                            "recipe_version": (
+                                capability.recipe.get("version")
+                                if isinstance(capability.recipe, dict)
+                                else None
+                            ),
+                        },
+                    }
+                    response_snapshot, output_payload = await self._execute_composite_capability(
+                        capability=capability,
+                        resolved_inputs=resolved_inputs,
+                        run_inputs=run.inputs or {},
+                    )
+                    step_run.action_id = None
+                else:
+                    action = await self._get_action_from_capability(capability_id, capability)
+                    step_run.action_id = action.id
+                    request_payload = self._build_request_payload(
+                        action=action,
+                        resolved_inputs=resolved_inputs,
+                    )
+                    missing_required = sorted(set(request_payload["missing_required"]))
+                    if missing_required:
+                        raise StepExecutionError(f"Missing inputs: {missing_required}")
 
-                response_snapshot, output_payload = await self._call_action(action, request_payload)
+                    response_snapshot, output_payload = await self._call_action(action, request_payload)
 
                 step_outputs[str(step)] = output_payload
                 context["step_outputs"] = step_outputs
@@ -346,7 +371,7 @@ class ExecutionService:
     def _build_edge_value_key(from_step: int, to_step: int, edge_type: str) -> str:
         return f"{from_step}:{to_step}:{edge_type}"
 
-    async def _get_action_from_node(self, node: dict[str, Any]) -> tuple[uuid.UUID, Action]:
+    async def _get_capability_from_node(self, node: dict[str, Any]) -> tuple[uuid.UUID, Capability]:
         endpoint = self._get_primary_endpoint(node)
         capability_id = endpoint.get("capability_id") if isinstance(endpoint, dict) else None
         capability_uuid = self._to_uuid(capability_id)
@@ -356,7 +381,13 @@ class ExecutionService:
         capability = await self.session.get(Capability, capability_uuid)
         if capability is None:
             raise StepExecutionError(f"Capability not found: {capability_uuid}")
+        return capability_uuid, capability
 
+    async def _get_action_from_capability(
+        self,
+        capability_uuid: uuid.UUID,
+        capability: Capability,
+    ) -> Action:
         action_uuid = capability.action_id
         if action_uuid is None:
             raise StepExecutionError(
@@ -368,6 +399,11 @@ class ExecutionService:
             raise StepExecutionError(
                 f"Action not found for capability {capability_uuid}: {action_uuid}"
             )
+        return action
+
+    async def _get_action_from_node(self, node: dict[str, Any]) -> tuple[uuid.UUID, Action]:
+        capability_uuid, capability = await self._get_capability_from_node(node)
+        action = await self._get_action_from_capability(capability_uuid, capability)
         return capability_uuid, action
 
     def _create_step_run_from_node(
@@ -578,6 +614,194 @@ class ExecutionService:
             raise StepExecutionError(f"Upstream endpoint returned HTTP {response.status_code}", response_snapshot=response_snapshot)
 
         return response_snapshot, response_body
+
+    async def _execute_composite_capability(
+        self,
+        *,
+        capability: Capability,
+        resolved_inputs: dict[str, Any],
+        run_inputs: dict[str, Any],
+    ) -> tuple[dict[str, Any], Any]:
+        recipe = capability.recipe if isinstance(capability.recipe, dict) else None
+        if recipe is None:
+            raise StepExecutionError(
+                f"Composite capability does not have a valid recipe: {capability.id}"
+            )
+        steps = recipe.get("steps")
+        if not isinstance(steps, list) or not steps:
+            raise StepExecutionError(
+                f"Composite capability recipe has no steps: {capability.id}"
+            )
+
+        ordered_steps = sorted(
+            [step for step in steps if isinstance(step, dict)],
+            key=lambda item: self._safe_int(item.get("step"), fallback=0),
+        )
+        composite_run_scope = dict(run_inputs)
+        composite_run_scope.update(resolved_inputs)
+        nested_outputs: dict[int, Any] = {}
+        nested_trace: list[dict[str, Any]] = []
+
+        for raw_step in ordered_steps:
+            step_number = self._safe_int(raw_step.get("step"), fallback=0)
+            if step_number <= 0:
+                raise StepExecutionError("Composite recipe has invalid step number")
+
+            step_capability_uuid = self._to_uuid(raw_step.get("capability_id"))
+            if step_capability_uuid is None:
+                raise StepExecutionError(
+                    f"Composite recipe step {step_number} has invalid capability_id"
+                )
+            step_capability = await self.session.get(Capability, step_capability_uuid)
+            if step_capability is None:
+                raise StepExecutionError(
+                    f"Composite recipe step {step_number} capability not found: {step_capability_uuid}"
+                )
+            if self._capability_type_value(step_capability) != CapabilityType.ATOMIC.value:
+                raise StepExecutionError(
+                    f"Composite recipe step {step_number} must reference ATOMIC capability: {step_capability_uuid}"
+                )
+
+            step_action = await self._get_action_from_capability(
+                step_capability_uuid,
+                step_capability,
+            )
+
+            raw_inputs = raw_step.get("inputs")
+            normalized_inputs: dict[str, Any] = {}
+            if isinstance(raw_inputs, dict):
+                for input_name, binding_expr in raw_inputs.items():
+                    if not isinstance(input_name, str):
+                        continue
+                    if not isinstance(binding_expr, str):
+                        continue
+                    value = self._resolve_composite_binding(
+                        binding_expr=binding_expr.strip(),
+                        run_scope=composite_run_scope,
+                        step_outputs=nested_outputs,
+                    )
+                    if value is not None:
+                        normalized_inputs[input_name] = value
+
+            step_request = self._build_request_payload(
+                action=step_action,
+                resolved_inputs=normalized_inputs,
+            )
+            missing_required = sorted(set(step_request["missing_required"]))
+            if missing_required:
+                nested_trace.append(
+                    {
+                        "step": step_number,
+                        "capability_id": str(step_capability_uuid),
+                        "action_id": str(step_action.id),
+                        "status": "failed",
+                        "resolved_inputs": normalized_inputs,
+                        "missing_required": missing_required,
+                    }
+                )
+                raise StepExecutionError(
+                    f"Composite step {step_number} missing required inputs: {missing_required}",
+                    response_snapshot={"nested_trace": nested_trace},
+                )
+
+            try:
+                action_response, action_output = await self._call_action(step_action, step_request)
+            except StepExecutionError as exc:
+                nested_trace.append(
+                    {
+                        "step": step_number,
+                        "capability_id": str(step_capability_uuid),
+                        "action_id": str(step_action.id),
+                        "status": "failed",
+                        "resolved_inputs": normalized_inputs,
+                        "request_snapshot": step_request.get("request_snapshot"),
+                        "response_snapshot": exc.response_snapshot,
+                        "error": str(exc),
+                    }
+                )
+                raise StepExecutionError(
+                    f"Composite step {step_number} failed: {exc}",
+                    response_snapshot={"nested_trace": nested_trace},
+                ) from exc
+
+            nested_outputs[step_number] = action_output
+            nested_trace.append(
+                {
+                    "step": step_number,
+                    "capability_id": str(step_capability_uuid),
+                    "action_id": str(step_action.id),
+                    "status": "succeeded",
+                    "resolved_inputs": normalized_inputs,
+                    "request_snapshot": step_request.get("request_snapshot"),
+                    "response_snapshot": action_response,
+                }
+            )
+
+        if not nested_outputs:
+            raise StepExecutionError(
+                f"Composite capability recipe has no executable steps: {capability.id}"
+            )
+
+        final_step = max(nested_outputs.keys())
+        final_output = nested_outputs[final_step]
+        composite_response = {
+            "capability_type": CapabilityType.COMPOSITE.value,
+            "recipe_version": recipe.get("version"),
+            "steps_executed": len(nested_outputs),
+            "nested_trace": nested_trace,
+        }
+        return composite_response, final_output
+
+    def _resolve_composite_binding(
+        self,
+        *,
+        binding_expr: str,
+        run_scope: dict[str, Any],
+        step_outputs: dict[int, Any],
+    ) -> Any:
+        if binding_expr.startswith("$run."):
+            path = binding_expr[len("$run.") :]
+            return self._resolve_dot_path(run_scope, path)
+        if binding_expr.startswith("$step."):
+            match = re.fullmatch(r"\$step\.(\d+)\.(.+)", binding_expr)
+            if not match:
+                return None
+            source_step = int(match.group(1))
+            path = match.group(2)
+            source_payload = step_outputs.get(source_step)
+            return self._resolve_dot_path(source_payload, path)
+        return None
+
+    def _resolve_dot_path(self, payload: Any, path: str) -> Any:
+        if payload is None:
+            return None
+        current: Any = payload
+        for part in [chunk for chunk in str(path).split(".") if chunk]:
+            if isinstance(current, dict):
+                if part not in current:
+                    return None
+                current = current.get(part)
+                continue
+            if isinstance(current, list):
+                if not part.isdigit():
+                    return None
+                index = int(part)
+                if index < 0 or index >= len(current):
+                    return None
+                current = current[index]
+                continue
+            return None
+        return current
+
+    def _capability_type_value(self, capability: Capability) -> str:
+        raw = getattr(capability, "type", None)
+        if isinstance(raw, CapabilityType):
+            return raw.value
+        if isinstance(raw, str):
+            return raw
+        if hasattr(raw, "value"):
+            return str(raw.value)
+        return CapabilityType.ATOMIC.value
 
     @staticmethod
     def _extract_response_body(response: httpx.Response) -> Any:

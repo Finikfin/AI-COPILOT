@@ -15,7 +15,8 @@ class PipelineInputTypeFromPrevious(BaseModel):
 class PipelineStepEndpoint(BaseModel):
     name: str
     capability_id: UUID
-    action_id: UUID
+    action_id: UUID | None = None
+    type: str | None = None
     input_type: str | dict[str, Any] | None = None
     output_type: str | dict[str, Any] | None = None
 

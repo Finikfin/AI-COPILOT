@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import re
-from typing import NamedTuple
+from typing import Any, NamedTuple
 from uuid import UUID
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Action, Capability
+from app.models.capability import CapabilityType
 
 
 class SelectedCapability(NamedTuple):
@@ -178,7 +179,7 @@ class SemanticSelectionService:
         executable_capabilities = [
             capability
             for capability in capabilities
-            if getattr(capability, "action_id", None) is not None
+            if self._is_executable_capability(capability)
         ]
         candidates = executable_capabilities
         if not candidates:
@@ -231,7 +232,8 @@ class SemanticSelectionService:
         name_tokens = self._tokenize(name)
         description_tokens = self._tokenize(description)
         context_tokens = self._extract_context_tokens(capability)
-        combined_tokens = name_tokens | description_tokens | context_tokens
+        recipe_tokens = self._extract_recipe_tokens(capability)
+        combined_tokens = name_tokens | description_tokens | context_tokens | recipe_tokens
         if not combined_tokens:
             return 0.0
 
@@ -280,7 +282,13 @@ class SemanticSelectionService:
             return set()
 
         chunks: list[str] = []
-        for key in ("action_context_brief", "openapi_hints", "action_context"):
+        for key in (
+            "action_context_brief",
+            "openapi_hints",
+            "action_context",
+            "recipe_summary",
+            "composite_context",
+        ):
             value = llm_payload.get(key)
             if value is None:
                 continue
@@ -288,6 +296,32 @@ class SemanticSelectionService:
 
         tokens: set[str] = set()
         for chunk in chunks[:120]:
+            tokens.update(self._tokenize(chunk))
+        return tokens
+
+    def _extract_recipe_tokens(self, capability: Capability) -> set[str]:
+        recipe = getattr(capability, "recipe", None)
+        if not isinstance(recipe, dict):
+            return set()
+        steps = recipe.get("steps")
+        if not isinstance(steps, list):
+            return set()
+
+        chunks: list[str] = []
+        for raw_step in steps[:30]:
+            if not isinstance(raw_step, dict):
+                continue
+            inputs = raw_step.get("inputs")
+            if not isinstance(inputs, dict):
+                continue
+            for key, value in inputs.items():
+                if isinstance(key, str):
+                    chunks.append(key)
+                if isinstance(value, str):
+                    chunks.append(value)
+
+        tokens: set[str] = set()
+        for chunk in chunks:
             tokens.update(self._tokenize(chunk))
         return tokens
 
@@ -379,6 +413,32 @@ class SemanticSelectionService:
             for token in tokens
             if len(token) >= 3 and token not in self._STOPWORDS
         }
+
+    def _is_executable_capability(self, capability: Capability) -> bool:
+        cap_type = self._capability_type_value(capability)
+        if cap_type == CapabilityType.ATOMIC.value:
+            return getattr(capability, "action_id", None) is not None
+        if cap_type == CapabilityType.COMPOSITE.value:
+            return self._recipe_is_executable(getattr(capability, "recipe", None))
+        return False
+
+    def _recipe_is_executable(self, recipe: Any) -> bool:
+        if not isinstance(recipe, dict):
+            return False
+        if recipe.get("version") != 1:
+            return False
+        steps = recipe.get("steps")
+        return isinstance(steps, list) and bool(steps)
+
+    def _capability_type_value(self, capability: Capability) -> str:
+        raw = getattr(capability, "type", None)
+        if isinstance(raw, CapabilityType):
+            return raw.value
+        if isinstance(raw, str):
+            return raw
+        if hasattr(raw, "value"):
+            return str(raw.value)
+        return CapabilityType.ATOMIC.value
 
     def _expand_tokens(self, tokens: set[str]) -> set[str]:
         expanded: set[str] = set()

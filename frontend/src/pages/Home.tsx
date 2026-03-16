@@ -73,22 +73,40 @@ const Home: React.FC = () => {
             {/* File Badges - Absolute position within the expanded container */}
             <AnimatePresence>
               {importedFiles.length > 0 && (
-                <motion.div 
+                <motion.div
                   initial={{ opacity: 0, y: -10 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
                   className="absolute top-3 left-4 flex items-center gap-2"
                 >
-                  {importedFiles.slice(0, 2).map((file, idx) => (
+                  {importedFiles.slice(0, 3).map((file, idx) => (
                     <div key={idx} className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-primary/10 border border-primary/20 text-[11px] font-medium text-primary">
                       <FileJson className="h-3 w-3" />
                       <span className="max-w-[100px] truncate">{file}</span>
                     </div>
                   ))}
-                  {importedFiles.length > 2 && (
-                    <div className="px-2 py-1 rounded-lg bg-muted border border-border text-[11px] font-medium text-muted-foreground">
-                      +{importedFiles.length - 2}
-                    </div>
+                  {importedFiles.length > 3 && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className="px-2 py-1 rounded-lg bg-muted border border-border text-[11px] font-medium text-muted-foreground cursor-help hover:bg-muted/80 transition-colors">
+                          +{importedFiles.length - 3}
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" sideOffset={10} className="p-3 bg-card/95 backdrop-blur-md border-border shadow-xl min-w-[240px]">
+                        <div className="space-y-2">
+                          <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-2">Все загруженные файлы</p>
+                          <div className="max-h-60 overflow-y-auto space-y-1 pr-1 no-scrollbar">
+                            {importedFiles.map((file, idx) => (
+                              <div key={idx} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-primary/10 transition-colors border border-transparent hover:border-primary/20">
+                                <span className="text-[9px] font-mono opacity-50 w-4">{idx + 1}.</span>
+                                <FileJson className="h-3.5 w-3.5 text-primary/70" />
+                                <span className="text-[11px] text-foreground font-medium truncate flex-1">{file}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
                   )}
                 </motion.div>
               )}

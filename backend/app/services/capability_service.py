@@ -8,6 +8,13 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Action, Capability
+from app.models.capability import CapabilityType
+
+
+class CompositeRecipeValidationError(ValueError):
+    def __init__(self, errors: list[str]) -> None:
+        self.errors = errors
+        super().__init__("; ".join(errors))
 
 
 class CapabilityService:
@@ -20,8 +27,6 @@ class CapabilityService:
         *,
         owner_user_id: UUID,
     ) -> list[Capability]:
-        from app.models.capability import CapabilityType
-
         capabilities: list[Capability] = []
         for action in actions:
             capability_payload = CapabilityService._build_capability_payload(action)
@@ -50,9 +55,9 @@ class CapabilityService:
         input_schema: dict[str, Any] | None = None,
         output_schema: dict[str, Any] | None = None,
         recipe: dict[str, Any],
+        llm_payload: dict[str, Any] | None = None,
+        data_format: dict[str, Any] | None = None,
     ) -> Capability:
-        from app.models.capability import CapabilityType
-
         capability = Capability(
             user_id=owner_user_id,
             type=CapabilityType.COMPOSITE,
@@ -61,11 +66,207 @@ class CapabilityService:
             input_schema=input_schema,
             output_schema=output_schema,
             recipe=recipe,
+            llm_payload=llm_payload,
+            data_format=data_format,
         )
         self.session.add(capability)
         await self.session.flush()
         await self.session.refresh(capability)
         return capability
+
+    async def create_validated_composite_capability(
+        self,
+        *,
+        owner_user_id: UUID,
+        name: str,
+        description: str | None = None,
+        input_schema: dict[str, Any] | None = None,
+        output_schema: dict[str, Any] | None = None,
+        recipe: dict[str, Any],
+        include_all: bool = False,
+    ) -> Capability:
+        normalized_recipe, step_capabilities = await self.validate_composite_recipe(
+            recipe=recipe,
+            owner_user_id=owner_user_id,
+            include_all=include_all,
+        )
+        llm_payload = self._build_composite_llm_payload(step_capabilities)
+        data_format = {
+            "request_schema_type": input_schema.get("type")
+            if isinstance(input_schema, dict)
+            else None,
+            "response_schema_types": [output_schema.get("type")]
+            if isinstance(output_schema, dict)
+            and isinstance(output_schema.get("type"), str)
+            else [],
+            "composite": {
+                "version": normalized_recipe.get("version"),
+                "steps_count": len(normalized_recipe.get("steps", [])),
+                "step_capability_names": [
+                    str(getattr(capability, "name", ""))
+                    for capability in step_capabilities
+                ],
+            },
+        }
+        return await self.create_composite_capability(
+            owner_user_id=owner_user_id,
+            name=name,
+            description=description,
+            input_schema=input_schema,
+            output_schema=output_schema,
+            recipe=normalized_recipe,
+            llm_payload=llm_payload,
+            data_format=data_format,
+        )
+
+    async def validate_composite_recipe(
+        self,
+        *,
+        recipe: dict[str, Any],
+        owner_user_id: UUID,
+        include_all: bool = False,
+    ) -> tuple[dict[str, Any], list[Capability]]:
+        errors: list[str] = []
+        if not isinstance(recipe, dict):
+            raise CompositeRecipeValidationError(["recipe must be an object"])
+
+        version = recipe.get("version")
+        if version != 1:
+            errors.append("recipe.version must be 1")
+
+        raw_steps = recipe.get("steps")
+        if not isinstance(raw_steps, list) or not raw_steps:
+            errors.append("recipe.steps must be a non-empty list")
+            raise CompositeRecipeValidationError(errors)
+
+        normalized_steps: list[dict[str, Any]] = []
+        seen_step_numbers: set[int] = set()
+        for index, raw_step in enumerate(raw_steps):
+            if not isinstance(raw_step, dict):
+                errors.append(f"recipe.steps[{index}] must be an object")
+                continue
+
+            step_number = raw_step.get("step")
+            if not isinstance(step_number, int) or step_number < 1:
+                errors.append(f"recipe.steps[{index}].step must be positive integer")
+                continue
+
+            if step_number in seen_step_numbers:
+                errors.append(f"recipe.steps[{index}].step duplicates step {step_number}")
+            seen_step_numbers.add(step_number)
+
+            capability_uuid = self._to_uuid(raw_step.get("capability_id"))
+            if capability_uuid is None:
+                errors.append(f"recipe.steps[{index}].capability_id must be UUID")
+                continue
+
+            raw_inputs = raw_step.get("inputs", {})
+            if raw_inputs is None:
+                raw_inputs = {}
+            if not isinstance(raw_inputs, dict):
+                errors.append(f"recipe.steps[{index}].inputs must be an object")
+                raw_inputs = {}
+
+            normalized_inputs: dict[str, str] = {}
+            for input_name, binding in raw_inputs.items():
+                if not isinstance(input_name, str) or not input_name.strip():
+                    errors.append(f"recipe.steps[{index}].inputs has invalid key")
+                    continue
+                if not isinstance(binding, str):
+                    errors.append(
+                        f"recipe.steps[{index}].inputs.{input_name} must be string binding"
+                    )
+                    continue
+                normalized_binding = binding.strip()
+                if not normalized_binding:
+                    errors.append(
+                        f"recipe.steps[{index}].inputs.{input_name} must be non-empty binding"
+                    )
+                    continue
+                if not self._is_supported_binding_expression(normalized_binding):
+                    errors.append(
+                        f"recipe.steps[{index}].inputs.{input_name} has unsupported binding '{normalized_binding}'"
+                    )
+                    continue
+                normalized_inputs[input_name] = normalized_binding
+
+            normalized_steps.append(
+                {
+                    "step": step_number,
+                    "capability_id": str(capability_uuid),
+                    "inputs": normalized_inputs,
+                }
+            )
+
+        if errors:
+            raise CompositeRecipeValidationError(errors)
+
+        normalized_steps.sort(key=lambda item: item["step"])
+        for idx in range(1, len(normalized_steps)):
+            if normalized_steps[idx]["step"] <= normalized_steps[idx - 1]["step"]:
+                errors.append("recipe.steps must be strictly increasing by step")
+                break
+
+        known_steps = {item["step"] for item in normalized_steps}
+        for item in normalized_steps:
+            for binding in item["inputs"].values():
+                if not binding.startswith("$step."):
+                    continue
+                source_step = self._extract_binding_source_step(binding)
+                if source_step is None:
+                    errors.append(
+                        f"step {item['step']}: invalid step binding '{binding}'"
+                    )
+                    continue
+                if source_step not in known_steps:
+                    errors.append(
+                        f"step {item['step']}: binding references missing step {source_step}"
+                    )
+                    continue
+                if source_step >= item["step"]:
+                    errors.append(
+                        f"step {item['step']}: binding references non-previous step {source_step}"
+                    )
+
+        capability_ids = [UUID(item["capability_id"]) for item in normalized_steps]
+        capabilities = await self.get_capabilities(
+            capability_ids=capability_ids,
+            owner_user_id=owner_user_id,
+            include_all=include_all,
+        )
+        capabilities_by_id = {str(item.id): item for item in capabilities}
+        for item in normalized_steps:
+            capability = capabilities_by_id.get(item["capability_id"])
+            if capability is None:
+                errors.append(
+                    f"step {item['step']}: capability {item['capability_id']} not found or not accessible"
+                )
+                continue
+
+            capability_type = self._capability_type_value(capability)
+            if capability_type != CapabilityType.ATOMIC.value:
+                errors.append(
+                    f"step {item['step']}: nested composite is not allowed ({item['capability_id']})"
+                )
+                continue
+            if getattr(capability, "action_id", None) is None:
+                errors.append(
+                    f"step {item['step']}: atomic capability {item['capability_id']} has no action_id"
+                )
+
+        if errors:
+            raise CompositeRecipeValidationError(errors)
+
+        normalized_recipe = {
+            "version": 1,
+            "steps": normalized_steps,
+        }
+        ordered_caps = [
+            capabilities_by_id[item["capability_id"]]
+            for item in normalized_steps
+            if item["capability_id"] in capabilities_by_id
+        ]
+        return normalized_recipe, ordered_caps
 
     async def create_from_actions(
         self,
@@ -146,6 +347,54 @@ class CapabilityService:
             )
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
+
+    @staticmethod
+    def _is_supported_binding_expression(value: str) -> bool:
+        if re.fullmatch(r"\$run\.[A-Za-z0-9_][A-Za-z0-9_\.]*", value):
+            return True
+        if re.fullmatch(r"\$step\.\d+\.[A-Za-z0-9_][A-Za-z0-9_\.]*", value):
+            return True
+        return False
+
+    @staticmethod
+    def _extract_binding_source_step(value: str) -> int | None:
+        match = re.fullmatch(r"\$step\.(\d+)\.[A-Za-z0-9_][A-Za-z0-9_\.]*", value)
+        if not match:
+            return None
+        return int(match.group(1))
+
+    @staticmethod
+    def _to_uuid(value: Any) -> UUID | None:
+        try:
+            return UUID(str(value))
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _capability_type_value(capability: Capability) -> str:
+        cap_type = getattr(capability, "type", None)
+        if isinstance(cap_type, CapabilityType):
+            return cap_type.value
+        if isinstance(cap_type, str):
+            return cap_type
+        if hasattr(cap_type, "value"):
+            return str(cap_type.value)
+        return CapabilityType.ATOMIC.value
+
+    @staticmethod
+    def _build_composite_llm_payload(step_capabilities: list[Capability]) -> dict[str, Any]:
+        step_names = [
+            str(getattr(capability, "name", "") or "")
+            for capability in step_capabilities
+            if str(getattr(capability, "name", "") or "").strip()
+        ]
+        return {
+            "source": "composite",
+            "recipe_summary": {
+                "steps_count": len(step_capabilities),
+                "step_names": step_names,
+            },
+        }
 
     @staticmethod
     def _build_capability_payload(action: Action) -> dict[str, Any]:
