@@ -2,6 +2,8 @@ import sys
 import asyncio
 import os
 import uuid
+import logging
+from time import perf_counter
 from contextlib import asynccontextmanager
 from prometheus_fastapi_instrumentator import Instrumentator
 
@@ -18,6 +20,7 @@ from app.utils.error_handlers import (
     http_exception_handler,
     unhandled_exception_handler,
 )
+from app.core.logging import configure_logging
 from app.core.database.init import init_db
 
 try:
@@ -57,6 +60,9 @@ except ModuleNotFoundError as exc:
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
+configure_logging()
+http_logger = logging.getLogger("app.http")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -93,8 +99,36 @@ app = FastAPI(lifespan=lifespan)
 async def add_trace_id(request, call_next):
     trace_id = request.headers.get("X-Trace-Id") or str(uuid.uuid4())
     request.state.traceId = trace_id
-    
-    response = await call_next(request)
+
+    started_at = perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        duration_ms = int((perf_counter() - started_at) * 1000)
+        http_logger.exception(
+            "http_request_failed",
+            extra={
+                "event": "http_request_failed",
+                "trace_id": trace_id,
+                "method": request.method,
+                "path": request.url.path,
+                "duration_ms": duration_ms,
+            },
+        )
+        raise
+
+    duration_ms = int((perf_counter() - started_at) * 1000)
+    http_logger.info(
+        "http_request",
+        extra={
+            "event": "http_request",
+            "trace_id": trace_id,
+            "method": request.method,
+            "path": request.url.path,
+            "status_code": response.status_code,
+            "duration_ms": duration_ms,
+        },
+    )
     response.headers["X-Trace-Id"] = trace_id
     return response
 
