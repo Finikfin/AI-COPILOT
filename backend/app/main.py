@@ -92,7 +92,7 @@ async def lifespan(app: FastAPI):
         await redis.close()
 
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(lifespan=lifespan, redirect_slashes=False)
 
 
 @app.middleware("http")

@@ -16,6 +16,7 @@ from app.utils.token_manager import get_current_user
 router = APIRouter(tags=["Capabilities"])
 
 
+@router.get("", response_model=list[CapabilityResponse], include_in_schema=False)
 @router.get("/", response_model=list[CapabilityResponse])
 async def list_capabilities(
     request: Request,

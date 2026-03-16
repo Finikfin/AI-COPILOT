@@ -14,6 +14,7 @@ from app.utils.token_manager import get_current_user
 router = APIRouter(tags=["Executions"])
 
 
+@router.get("", response_model=list[ExecutionRunListItemResponse], include_in_schema=False)
 @router.get("/", response_model=list[ExecutionRunListItemResponse])
 async def list_executions(
     request: Request,

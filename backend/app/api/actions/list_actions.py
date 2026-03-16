@@ -16,7 +16,8 @@ from app.utils.token_manager import get_current_user
 router = APIRouter(tags=["Actions"])
 
 
-@router.get("/", response_model=list[ActionListItemResponse])
+@router.get("", response_model=list[ActionListItemResponse])
+@router.get("/", response_model=list[ActionListItemResponse], include_in_schema=False)
 async def list_actions(
     request: Request,
     method: HttpMethod | None = Query(default=None),
