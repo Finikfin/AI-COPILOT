@@ -63,7 +63,16 @@ const Capabilities: React.FC = () => {
   const groupedCapabilities = React.useMemo(() => {
     return filteredCapabilities.reduce((acc, cap) => {
       const isComposite = String(cap.type || 'ATOMIC').toUpperCase() === 'COMPOSITE';
-      const associatedActions = actions.filter(a => a.id === cap.action_id);
+      
+      const associatedActions = isComposite
+        ? (cap.recipe?.steps || [])
+            .map(step => {
+              const stepCap = capabilities.find(c => c.id === step.capability_id);
+              return actions.find(a => a.id === stepCap?.action_id);
+            })
+            .filter((a): a is typeof actions[0] => !!a)
+        : actions.filter(a => a.id === cap.action_id);
+
       const action = associatedActions[0];
       const filename = isComposite
         ? 'Composite Capabilities'
@@ -72,7 +81,7 @@ const Capabilities: React.FC = () => {
       acc[filename].push({ capability: cap, associatedActions });
       return acc;
     }, {} as Record<string, Array<{ capability: typeof filteredCapabilities[0], associatedActions: typeof actions }>>);
-  }, [actions, filteredCapabilities]);
+  }, [actions, capabilities, filteredCapabilities]);
 
   const atomicCapabilities = React.useMemo(() => {
     return capabilities.filter((cap) => String(cap.type || 'ATOMIC').toUpperCase() === 'ATOMIC');
@@ -220,11 +229,12 @@ const Capabilities: React.FC = () => {
                           </p>
 
                           <div className="mt-4 pt-3 border-t border-border/50 flex items-center justify-between text-[10px] text-muted-foreground">
-                            {String(cap.type || 'ATOMIC').toUpperCase() === 'COMPOSITE' ? (
-                              <span className="font-medium">
-                                Recipe steps: {cap.recipe?.steps?.length ?? 0}
-                              </span>
-                            ) : (
+                            <div className="flex items-center gap-3">
+                              {String(cap.type || 'ATOMIC').toUpperCase() === 'COMPOSITE' && (
+                                <span className="font-medium whitespace-nowrap">
+                                  {cap.recipe?.steps?.length ?? 0} Steps
+                                </span>
+                              )}
                               <Popover>
                                 <PopoverTrigger asChild>
                                   <button className="flex items-center gap-1.5 font-medium hover:text-primary transition-colors cursor-pointer group/link">
@@ -239,8 +249,8 @@ const Capabilities: React.FC = () => {
                                   <div className="max-h-[300px] overflow-auto custom-scrollbar">
                                     {associatedActions.length > 0 ? (
                                       <div className="divide-y divide-border/50">
-                                        {associatedActions.map((action) => (
-                                          <div key={action.id} className="p-3 hover:bg-muted/50 transition-colors">
+                                        {associatedActions.map((action, idx) => (
+                                          <div key={`${action.id}-${idx}`} className="p-3 hover:bg-muted/50 transition-colors">
                                             <div className="flex items-center gap-2 mb-1">
                                               <Badge variant="outline" className={cn("px-1 py-0 text-[9px] font-bold border-none h-4", getMethodColor(action.method))}>
                                                 {action.method}
@@ -264,7 +274,7 @@ const Capabilities: React.FC = () => {
 
                                 </PopoverContent>
                               </Popover>
-                            )}
+                            </div>
                           </div>
                         </CardContent>
                       </Card>
