@@ -270,8 +270,9 @@ export const formatPayload = (payload: unknown): string => {
   }
 };
 
-const MAX_PAYLOAD_PREVIEW_ITEMS = 6;
+const MAX_PAYLOAD_PREVIEW_ITEMS = 8;
 const MAX_PAYLOAD_DEPTH = 3;
+type PayloadTone = 'incoming' | 'outgoing';
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -285,6 +286,40 @@ const formatFieldLabel = (field: string): string => {
     return 'Поле';
   }
   return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+};
+
+const describePayload = (value: unknown): string => {
+  if (value === null || value === undefined) {
+    return 'Нет данных';
+  }
+  if (Array.isArray(value)) {
+    return `Массив · ${value.length}`;
+  }
+  if (isPlainObject(value)) {
+    return `Объект · ${Object.keys(value).length}`;
+  }
+  if (typeof value === 'string') {
+    return 'Строка';
+  }
+  if (typeof value === 'number') {
+    return 'Число';
+  }
+  if (typeof value === 'boolean') {
+    return 'Boolean';
+  }
+  return 'Значение';
+};
+
+const scalarClassName = (value: unknown): string => {
+  if (typeof value === 'number') {
+    return 'border-blue-500/30 bg-blue-500/10 text-blue-800';
+  }
+  if (typeof value === 'boolean') {
+    return value
+      ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-800'
+      : 'border-rose-500/30 bg-rose-500/10 text-rose-800';
+  }
+  return 'border-border bg-background text-foreground';
 };
 
 const toInlineValue = (value: unknown): string => {
@@ -314,7 +349,7 @@ const toInlineValue = (value: unknown): string => {
 const renderPayloadNode = (payload: unknown, depth = 0): React.ReactNode => {
   if (depth >= MAX_PAYLOAD_DEPTH) {
     return (
-      <span className="inline-flex rounded border border-border bg-background px-1.5 py-0.5 text-[11px]">
+      <span className="inline-flex max-w-full rounded-md border border-border bg-background px-2 py-0.5 text-[11px] break-all">
         {toInlineValue(payload)}
       </span>
     );
@@ -326,7 +361,12 @@ const renderPayloadNode = (payload: unknown, depth = 0): React.ReactNode => {
 
   if (typeof payload === 'string' || typeof payload === 'number' || typeof payload === 'boolean') {
     return (
-      <span className="inline-flex rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[11px] text-foreground">
+      <span
+        className={cn(
+          'inline-flex max-w-full rounded-md border px-2 py-0.5 font-mono text-[11px] break-all',
+          scalarClassName(payload)
+        )}
+      >
         {toInlineValue(payload)}
       </span>
     );
@@ -349,18 +389,21 @@ const renderPayloadNode = (payload: unknown, depth = 0): React.ReactNode => {
 
     if (primitivesOnly) {
       return (
-        <div className="flex flex-wrap gap-1">
+        <div className="flex flex-wrap gap-1.5">
           {visibleItems.map((item, index) => (
             <span
               key={`${index}-${String(item)}`}
-              className="inline-flex rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[11px]"
+              className={cn(
+                'inline-flex rounded-md border px-2 py-0.5 font-mono text-[11px]',
+                scalarClassName(item)
+              )}
             >
               {toInlineValue(item)}
             </span>
           ))}
           {payload.length > visibleItems.length && (
-            <span className="text-[11px] text-muted-foreground">
-              +{payload.length - visibleItems.length}
+            <span className="inline-flex rounded-md border border-dashed border-border bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
+              +{payload.length - visibleItems.length} ещё
             </span>
           )}
         </div>
@@ -368,19 +411,21 @@ const renderPayloadNode = (payload: unknown, depth = 0): React.ReactNode => {
     }
 
     return (
-      <div className="space-y-1.5">
+      <div className="space-y-2">
         {visibleItems.map((item, index) => (
-          <div key={index} className="rounded-md border border-border/70 bg-background/60 p-2">
-            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-              Элемент {index + 1}
-            </p>
-            {renderPayloadNode(item, depth + 1)}
+          <div key={index} className="rounded-lg border border-border/70 bg-background/80 p-2.5">
+            <div className="mb-1.5 flex items-center justify-between">
+              <p className="text-[11px] font-medium text-foreground">
+                Элемент {index + 1}
+              </p>
+            </div>
+            <div className="min-w-0 break-words">{renderPayloadNode(item, depth + 1)}</div>
           </div>
         ))}
         {payload.length > visibleItems.length && (
-          <p className="text-[11px] text-muted-foreground">
+          <div className="inline-flex rounded-md border border-dashed border-border bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
             +{payload.length - visibleItems.length} элементов
-          </p>
+          </div>
         )}
       </div>
     );
@@ -394,37 +439,60 @@ const renderPayloadNode = (payload: unknown, depth = 0): React.ReactNode => {
 
     const visibleEntries = entries.slice(0, MAX_PAYLOAD_PREVIEW_ITEMS);
     return (
-      <div className="space-y-1.5">
+      <div className="space-y-2">
         {visibleEntries.map(([key, value]) => (
           <div
             key={key}
-            className="grid grid-cols-[96px_minmax(0,1fr)] gap-2 rounded-md border border-border/70 bg-background/60 p-2"
+            className="grid grid-cols-[92px_minmax(0,1fr)] gap-2 rounded-lg border border-border/70 bg-background/80 px-2.5 py-2"
           >
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground break-words">
+            <p className="text-[11px] font-medium text-muted-foreground break-words">
               {formatFieldLabel(key)}
             </p>
             <div className="min-w-0 break-words">{renderPayloadNode(value, depth + 1)}</div>
           </div>
         ))}
         {entries.length > visibleEntries.length && (
-          <p className="text-[11px] text-muted-foreground">
+          <div className="inline-flex rounded-md border border-dashed border-border bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
             +{entries.length - visibleEntries.length} полей
-          </p>
+          </div>
         )}
       </div>
     );
   }
 
   return (
-    <span className="inline-flex rounded border border-border bg-background px-1.5 py-0.5 text-[11px]">
+    <span className="inline-flex max-w-full rounded-md border border-border bg-background px-2 py-0.5 text-[11px] break-all">
       {String(payload)}
     </span>
   );
 };
 
-const PayloadPreview: React.FC<{ payload: unknown }> = ({ payload }) => (
-  <div className="max-h-44 overflow-auto rounded-md border border-border bg-muted/30 p-2 text-[11px] leading-relaxed text-foreground">
-    {renderPayloadNode(payload)}
+const payloadToneClass = (tone: PayloadTone): string => {
+  if (tone === 'incoming') {
+    return 'border-blue-500/30 bg-gradient-to-br from-blue-500/5 to-sky-500/10';
+  }
+  return 'border-emerald-500/30 bg-gradient-to-br from-emerald-500/5 to-teal-500/10';
+};
+
+const payloadToneLabel = (tone: PayloadTone): string =>
+  tone === 'incoming' ? 'Input' : 'Output';
+
+const PayloadPreview: React.FC<{ payload: unknown; tone: PayloadTone }> = ({
+  payload,
+  tone,
+}) => (
+  <div className={cn('rounded-xl border p-2.5', payloadToneClass(tone))}>
+    <div className="mb-2 flex items-center justify-between">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+        {payloadToneLabel(tone)}
+      </p>
+      <span className="rounded-full border border-border/60 bg-background/70 px-2 py-0.5 text-[10px] text-muted-foreground">
+        {describePayload(payload)}
+      </span>
+    </div>
+    <div className="max-h-48 overflow-auto pr-1 text-[11px] leading-relaxed text-foreground">
+      {renderPayloadNode(payload)}
+    </div>
   </div>
 );
 
@@ -437,7 +505,7 @@ export const Pipelines: React.FC = () => {
   );
   const [activeRunId, setActiveRunId] = React.useState<string | null>(null);
   const [isRunStarting, setIsRunStarting] = React.useState(false);
-  const pollingTimerRef = React.useRef<any>(null);
+  const pollingTimerRef = React.useRef<number | null>(null);
   const isPollingRequestInFlightRef = React.useRef(false);
   const notifiedTerminalStatusRef = React.useRef<ExecutionRunStatus | null>(null);
   const [isChatVisible, setIsChatVisible] = React.useState(() => {
@@ -756,20 +824,20 @@ export const Pipelines: React.FC = () => {
                             </div>
 
                             {stepRun && shouldShowAcceptedPayload && (
-                              <div className="space-y-1">
-                                <p className="text-[10px] font-semibold text-foreground uppercase tracking-wider">
+                              <div className="space-y-2">
+                                <p className="text-xs font-semibold text-foreground">
                                   Принял
                                 </p>
-                                <PayloadPreview payload={stepRun.accepted_payload} />
+                                <PayloadPreview payload={stepRun.accepted_payload} tone="incoming" />
                               </div>
                             )}
 
                             {stepRun && (
-                              <div className="space-y-1">
-                                <p className="text-[10px] font-semibold text-foreground uppercase tracking-wider">
+                              <div className="space-y-2">
+                                <p className="text-xs font-semibold text-foreground">
                                   Вернул
                                 </p>
-                                <PayloadPreview payload={stepRun.output_payload} />
+                                <PayloadPreview payload={stepRun.output_payload} tone="outgoing" />
                               </div>
                             )}
 
