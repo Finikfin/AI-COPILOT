@@ -27,6 +27,9 @@ info:
 
     4. `POST /crm/offers/send`'
   version: 1.0.0
+servers:
+  - url: http://84.201.161.175
+    description: production
 paths:
   /users/recent:
     get:
