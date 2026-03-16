@@ -52,8 +52,8 @@ export const ImportResultsModal: React.FC<ImportResultsModalProps> = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[800px] max-h-[90vh] flex flex-col bg-card border-border">
-        <DialogHeader>
+      <DialogContent className="sm:max-w-[800px] h-[85vh] flex flex-col bg-card border-border overflow-hidden p-0">
+        <DialogHeader className="p-6 pb-2">
           <DialogTitle className="flex items-center gap-2 text-xl">
             <AlertCircle className="h-6 w-6 text-primary" />
             Результаты импорта
@@ -63,7 +63,7 @@ export const ImportResultsModal: React.FC<ImportResultsModalProps> = ({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid grid-cols-2 gap-4 mb-4">
+        <div className="grid grid-cols-2 gap-4 mb-4 px-6">
           <div className="bg-green-500/5 border border-green-500/20 rounded-xl p-4 flex items-center gap-3">
             <div className="h-10 w-10 rounded-full bg-green-500/10 flex items-center justify-center">
               <CheckCircle2 className="h-6 w-6 text-green-500" />
@@ -84,7 +84,7 @@ export const ImportResultsModal: React.FC<ImportResultsModalProps> = ({
           </div>
         </div>
 
-        <ScrollArea className="flex-1 pr-4">
+        <ScrollArea className="flex-1 min-h-0 px-6 pr-6">
           <div className="space-y-8">
             {/* Success Table */}
             {totalSuccess > 0 && (
@@ -160,7 +160,7 @@ export const ImportResultsModal: React.FC<ImportResultsModalProps> = ({
           </div>
         </ScrollArea>
 
-        <DialogFooter className="mt-6">
+        <DialogFooter className="p-6 pt-4 border-t border-border/40">
           <Button onClick={onClose} className="w-full sm:w-auto">
             Ок
           </Button>
