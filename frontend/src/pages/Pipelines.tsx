@@ -270,235 +270,10 @@ export const formatPayload = (payload: unknown): string => {
   }
 };
 
-const MAX_PAYLOAD_PREVIEW_ITEMS = 8;
-const MAX_PAYLOAD_DEPTH = 3;
-type PayloadTone = 'incoming' | 'outgoing';
-
-const isPlainObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
-const formatFieldLabel = (field: string): string => {
-  const normalized = field
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .replace(/[_-]+/g, ' ')
-    .trim();
-  if (!normalized) {
-    return 'Поле';
-  }
-  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
-};
-
-const describePayload = (value: unknown): string => {
-  if (value === null || value === undefined) {
-    return 'Нет данных';
-  }
-  if (Array.isArray(value)) {
-    return `Массив · ${value.length}`;
-  }
-  if (isPlainObject(value)) {
-    return `Объект · ${Object.keys(value).length}`;
-  }
-  if (typeof value === 'string') {
-    return 'Строка';
-  }
-  if (typeof value === 'number') {
-    return 'Число';
-  }
-  if (typeof value === 'boolean') {
-    return 'Boolean';
-  }
-  return 'Значение';
-};
-
-const scalarClassName = (value: unknown): string => {
-  if (typeof value === 'number') {
-    return 'border-blue-500/30 bg-blue-500/10 text-blue-800';
-  }
-  if (typeof value === 'boolean') {
-    return value
-      ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-800'
-      : 'border-rose-500/30 bg-rose-500/10 text-rose-800';
-  }
-  return 'border-border bg-background text-foreground';
-};
-
-const toInlineValue = (value: unknown): string => {
-  if (value === null || value === undefined) {
-    return 'нет данных';
-  }
-  if (typeof value === 'string') {
-    return value.trim() ? value : 'пустая строка';
-  }
-  if (typeof value === 'number' || typeof value === 'boolean') {
-    return String(value);
-  }
-  if (Array.isArray(value)) {
-    return `${value.length} элементов`;
-  }
-  if (isPlainObject(value)) {
-    const keys = Object.keys(value);
-    if (keys.length === 0) {
-      return 'пустой объект';
-    }
-    const preview = keys.slice(0, 3).join(', ');
-    return keys.length > 3 ? `объект: ${preview}, ...` : `объект: ${preview}`;
-  }
-  return String(value);
-};
-
-const renderPayloadNode = (payload: unknown, depth = 0): React.ReactNode => {
-  if (depth >= MAX_PAYLOAD_DEPTH) {
-    return (
-      <span className="inline-flex max-w-full rounded-md border border-border bg-background px-2 py-0.5 text-[11px] break-all">
-        {toInlineValue(payload)}
-      </span>
-    );
-  }
-
-  if (payload === null || payload === undefined) {
-    return <span className="text-muted-foreground">нет данных</span>;
-  }
-
-  if (typeof payload === 'string' || typeof payload === 'number' || typeof payload === 'boolean') {
-    return (
-      <span
-        className={cn(
-          'inline-flex max-w-full rounded-md border px-2 py-0.5 font-mono text-[11px] break-all',
-          scalarClassName(payload)
-        )}
-      >
-        {toInlineValue(payload)}
-      </span>
-    );
-  }
-
-  if (Array.isArray(payload)) {
-    if (payload.length === 0) {
-      return <span className="text-muted-foreground">пустой список</span>;
-    }
-
-    const visibleItems = payload.slice(0, MAX_PAYLOAD_PREVIEW_ITEMS);
-    const primitivesOnly = visibleItems.every(
-      (item) =>
-        item === null ||
-        item === undefined ||
-        typeof item === 'string' ||
-        typeof item === 'number' ||
-        typeof item === 'boolean'
-    );
-
-    if (primitivesOnly) {
-      return (
-        <div className="flex flex-wrap gap-1.5">
-          {visibleItems.map((item, index) => (
-            <span
-              key={`${index}-${String(item)}`}
-              className={cn(
-                'inline-flex rounded-md border px-2 py-0.5 font-mono text-[11px]',
-                scalarClassName(item)
-              )}
-            >
-              {toInlineValue(item)}
-            </span>
-          ))}
-          {payload.length > visibleItems.length && (
-            <span className="inline-flex rounded-md border border-dashed border-border bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
-              +{payload.length - visibleItems.length} ещё
-            </span>
-          )}
-        </div>
-      );
-    }
-
-    return (
-      <div className="space-y-2">
-        {visibleItems.map((item, index) => (
-          <div key={index} className="rounded-lg border border-border/70 bg-background/80 p-2.5">
-            <div className="mb-1.5 flex items-center justify-between">
-              <p className="text-[11px] font-medium text-foreground">
-                Элемент {index + 1}
-              </p>
-            </div>
-            <div className="min-w-0 break-words">{renderPayloadNode(item, depth + 1)}</div>
-          </div>
-        ))}
-        {payload.length > visibleItems.length && (
-          <div className="inline-flex rounded-md border border-dashed border-border bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
-            +{payload.length - visibleItems.length} элементов
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  if (isPlainObject(payload)) {
-    const entries = Object.entries(payload);
-    if (entries.length === 0) {
-      return <span className="text-muted-foreground">пустой объект</span>;
-    }
-
-    const visibleEntries = entries.slice(0, MAX_PAYLOAD_PREVIEW_ITEMS);
-    return (
-      <div className="space-y-2">
-        {visibleEntries.map(([key, value]) => (
-          <div
-            key={key}
-            className="grid grid-cols-[92px_minmax(0,1fr)] gap-2 rounded-lg border border-border/70 bg-background/80 px-2.5 py-2"
-          >
-            <p className="text-[11px] font-medium text-muted-foreground break-words">
-              {formatFieldLabel(key)}
-            </p>
-            <div className="min-w-0 break-words">{renderPayloadNode(value, depth + 1)}</div>
-          </div>
-        ))}
-        {entries.length > visibleEntries.length && (
-          <div className="inline-flex rounded-md border border-dashed border-border bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
-            +{entries.length - visibleEntries.length} полей
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <span className="inline-flex max-w-full rounded-md border border-border bg-background px-2 py-0.5 text-[11px] break-all">
-      {String(payload)}
-    </span>
-  );
-};
-
-const payloadToneClass = (tone: PayloadTone): string => {
-  if (tone === 'incoming') {
-    return 'border-blue-500/30 bg-gradient-to-br from-blue-500/5 to-sky-500/10';
-  }
-  return 'border-emerald-500/30 bg-gradient-to-br from-emerald-500/5 to-teal-500/10';
-};
-
-const payloadToneLabel = (tone: PayloadTone): string =>
-  tone === 'incoming' ? 'Input' : 'Output';
-
-const PayloadPreview: React.FC<{ payload: unknown; tone: PayloadTone }> = ({
-  payload,
-  tone,
-}) => (
-  <div className={cn('rounded-xl border p-2.5', payloadToneClass(tone))}>
-    <div className="mb-2 flex items-center justify-between">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-        {payloadToneLabel(tone)}
-      </p>
-      <span className="rounded-full border border-border/60 bg-background/70 px-2 py-0.5 text-[10px] text-muted-foreground">
-        {describePayload(payload)}
-      </span>
-    </div>
-    <div className="max-h-48 overflow-auto pr-1 text-[11px] leading-relaxed text-foreground">
-      {renderPayloadNode(payload)}
-    </div>
-  </div>
-);
 
 export const Pipelines: React.FC = () => {
   const location = useLocation();
-  const { currentPipeline } = usePipelineContext();
+  const { currentPipeline, isHydrating } = usePipelineContext();
   const [expandedStep, setExpandedStep] = React.useState<number | null>(null);
   const [execution, setExecution] = React.useState<ExecutionRunDetailResponse | null>(
     null
@@ -508,6 +283,8 @@ export const Pipelines: React.FC = () => {
   const pollingTimerRef = React.useRef<number | null>(null);
   const isPollingRequestInFlightRef = React.useRef(false);
   const notifiedTerminalStatusRef = React.useRef<ExecutionRunStatus | null>(null);
+  const lastPipelineIdRef = React.useRef<string | null>(null);
+
   const [isChatVisible, setIsChatVisible] = React.useState(() => {
     const saved = localStorage.getItem('pipelines_chat_visible');
     return saved !== null ? saved === 'true' : true;
@@ -520,6 +297,7 @@ export const Pipelines: React.FC = () => {
   const initialMessage = location.state?.initialMessage;
   const dialogId = location.state?.dialogId;
   const pipelineId = currentPipeline?.pipeline_id || null;
+
   const finalOutput = React.useMemo(
     () => execution?.summary?.final_output,
     [execution]
@@ -528,6 +306,7 @@ export const Pipelines: React.FC = () => {
   const graphLayout = currentPipeline && currentPipeline.nodes.length > 0
     ? buildGraphLayout(currentPipeline)
     : null;
+    
   const stepRunsByStep = React.useMemo(() => {
     const byStep = new Map<number, ExecutionStepRunResponse>();
     execution?.steps.forEach((stepRun) => {
@@ -535,6 +314,7 @@ export const Pipelines: React.FC = () => {
     });
     return byStep;
   }, [execution]);
+
   const runStatusMeta = getRunStatusMeta(execution?.status || null);
   const isExecutionInProgress = execution
     ? !isTerminalRunStatus(execution.status)
@@ -596,7 +376,7 @@ export const Pipelines: React.FC = () => {
       pollExecution(runId).catch(() => null);
       pollingTimerRef.current = window.setInterval(() => {
         pollExecution(runId).catch(() => null);
-      }, 2000);
+      }, 2000) as unknown as number;
     },
     [pollExecution, stopPollingExecution]
   );
@@ -612,6 +392,7 @@ export const Pipelines: React.FC = () => {
       notifiedTerminalStatusRef.current = null;
       const run = await runPipeline(pipelineId);
       setActiveRunId(run.run_id);
+      localStorage.setItem(`pipeline_active_run_${pipelineId}`, run.run_id);
       toast.success('Запуск пайплайна начат');
       startPollingExecution(run.run_id);
     } catch (error) {
@@ -644,12 +425,36 @@ export const Pipelines: React.FC = () => {
     }
   }, [activeRunId, finalOutput]);
 
+  // Handle pipeline ID changes and restore active run state
   React.useEffect(() => {
-    setExecution(null);
-    setActiveRunId(null);
-    notifiedTerminalStatusRef.current = null;
-    stopPollingExecution();
-  }, [pipelineId, stopPollingExecution]);
+    if (pipelineId) {
+      if (pipelineId !== lastPipelineIdRef.current) {
+        // Different pipeline: reset execution state
+        setExecution(null);
+        setActiveRunId(null);
+        notifiedTerminalStatusRef.current = null;
+        stopPollingExecution();
+        lastPipelineIdRef.current = pipelineId;
+
+        // Try to restore previous active run for this pipeline from storage
+        const savedRunId = localStorage.getItem(`pipeline_active_run_${pipelineId}`);
+        if (savedRunId) {
+          setActiveRunId(savedRunId);
+          startPollingExecution(savedRunId);
+        }
+      }
+    } else {
+      // If pipeline goes null (e.g. during hydration), we don't clear the state immediately
+      // to avoid visual flickering. We only clear it if it stays null and we are not hydrating.
+      if (!isHydrating) {
+        setExecution(null);
+        setActiveRunId(null);
+        notifiedTerminalStatusRef.current = null;
+        stopPollingExecution();
+        lastPipelineIdRef.current = null;
+      }
+    }
+  }, [pipelineId, isHydrating, stopPollingExecution, startPollingExecution]);
 
   React.useEffect(() => {
     return () => {
@@ -667,7 +472,12 @@ export const Pipelines: React.FC = () => {
             <p className="text-sm text-muted-foreground">Визуализация текущего процесса автоматизации</p>
           </div>
 
-          {graphLayout && currentPipeline ? (
+          {isHydrating ? (
+            <div className="flex flex-col items-center justify-center py-20 space-y-4">
+              <Loader2 className="h-12 w-12 animate-spin text-primary/40" />
+              <p className="text-sm text-muted-foreground animate-pulse">Восстановление данных сессии...</p>
+            </div>
+          ) : graphLayout && currentPipeline ? (
             <div
               className="relative mx-auto"
               style={{
@@ -675,6 +485,7 @@ export const Pipelines: React.FC = () => {
                 height: graphLayout.height,
               }}
             >
+              {/* SVG and Nodes rendering logic... */}
               <svg
                 className="absolute inset-0 h-full w-full"
                 viewBox={`0 0 ${graphLayout.width} ${graphLayout.height}`}
@@ -825,19 +636,19 @@ export const Pipelines: React.FC = () => {
 
                             {stepRun && shouldShowAcceptedPayload && (
                               <div className="space-y-2">
-                                <p className="text-xs font-semibold text-foreground">
-                                  Принял
-                                </p>
-                                <PayloadPreview payload={stepRun.accepted_payload} tone="incoming" />
+                                <p className="text-xs font-semibold text-foreground">Принял</p>
+                                <pre className="rounded-lg bg-muted/50 p-3 text-[10px] font-mono overflow-auto max-h-40 whitespace-pre scrollbar-hide border border-border/50">
+                                  {formatPayload(stepRun.accepted_payload)}
+                                </pre>
                               </div>
                             )}
 
                             {stepRun && (
                               <div className="space-y-2">
-                                <p className="text-xs font-semibold text-foreground">
-                                  Вернул
-                                </p>
-                                <PayloadPreview payload={stepRun.output_payload} tone="outgoing" />
+                                <p className="text-xs font-semibold text-foreground">Вернул</p>
+                                <pre className="rounded-lg bg-muted/50 p-3 text-[10px] font-mono overflow-auto max-h-40 whitespace-pre scrollbar-hide border border-border/50">
+                                  {formatPayload(stepRun.output_payload)}
+                                </pre>
                               </div>
                             )}
 
@@ -1006,30 +817,30 @@ export const Pipelines: React.FC = () => {
       </div>
 
       {/* Right Sidebar - AI Chat */}
-      <AnimatePresence mode="wait">
-        {isChatVisible ? (
-          <motion.div
-            key="chat"
-            initial={{ width: 0, opacity: 0 }}
-            animate={{ width: 320, opacity: 1 }}
-            exit={{ width: 0, opacity: 0 }}
-            transition={{ type: "spring", damping: 20, stiffness: 100 }}
-            className="flex-shrink-0"
-          >
-            <SynthesisChat
-              key={dialogId || 'active-dialog'}
-              className="w-full h-full"
-              initialMessage={initialMessage}
-              initialDialogId={dialogId}
-              onClose={() => setIsChatVisible(false)}
-            />
-          </motion.div>
-        ) : (
+      <div 
+        className={cn(
+          "h-full flex-shrink-0 transition-all duration-500 ease-in-out border-l border-border bg-card relative",
+          isChatVisible ? "w-80 opacity-100" : "w-0 opacity-0 overflow-hidden border-none"
+        )}
+      >
+        <div className="w-80 h-full absolute right-0 top-0">
+          <SynthesisChat
+            key={dialogId || 'active-dialog'}
+            className="w-full h-full"
+            initialMessage={initialMessage}
+            initialDialogId={dialogId}
+            onClose={() => setIsChatVisible(false)}
+          />
+        </div>
+      </div>
+
+      <AnimatePresence>
+        {!isChatVisible && (
           <motion.div
             key="toggle"
-            initial={{ opacity: 0, scale: 0.8 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.8 }}
+            initial={{ opacity: 0, scale: 0.8, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.8, y: 20 }}
             className="fixed bottom-6 right-6 z-50"
           >
             <Button

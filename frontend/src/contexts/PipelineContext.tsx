@@ -4,19 +4,27 @@ import { PipelineData } from '@/types/pipeline';
 interface PipelineContextType {
   currentPipeline: PipelineData | null;
   setPipeline: (pipeline: PipelineData | null) => void;
+  isHydrating: boolean;
+  setIsHydrating: (loading: boolean) => void;
 }
 
 const PipelineContext = createContext<PipelineContextType | undefined>(undefined);
 
 export const PipelineProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentPipeline, setCurrentPipeline] = useState<PipelineData | null>(null);
+  const [isHydrating, setIsHydrating] = useState(false);
 
   const setPipeline = useCallback((pipeline: PipelineData | null) => {
     setCurrentPipeline(pipeline);
   }, []);
 
   return (
-    <PipelineContext.Provider value={{ currentPipeline, setPipeline }}>
+    <PipelineContext.Provider value={{ 
+      currentPipeline, 
+      setPipeline, 
+      isHydrating, 
+      setIsHydrating 
+    }}>
       {children}
     </PipelineContext.Provider>
   );

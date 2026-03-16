@@ -16,7 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
-import { cn } from '@/lib/utils';
+import { cn, generateUUID } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 
 import { useQuery } from '@tanstack/react-query';
@@ -48,7 +48,7 @@ export const HistoryDrawer: React.FC<HistoryDrawerProps> = ({ isOpen, onClose })
 
   const handleOpenDialog = (dialogId: string) => {
     // Save to localStorage so SynthesisChat knows which one to load
-    const storageKey = `pipeline_active_dialog_id:${JSON.parse(localStorage.getItem('auth_user') || '{}')?.id || 'anonymous'
+    const storageKey = `pipeline_active_dialog_id:${JSON.parse(localStorage.getItem('user_data') || '{}')?.id || 'anonymous'
       }`;
     localStorage.setItem(storageKey, dialogId);
     navigate('/pipelines', { state: { dialogId } });
@@ -180,10 +180,11 @@ export const HistoryDrawer: React.FC<HistoryDrawerProps> = ({ isOpen, onClose })
                 className="w-full h-9 gap-2 text-xs"
                 variant="outline"
                 onClick={() => {
-                  const storageKey = `pipeline_active_dialog_id:${JSON.parse(localStorage.getItem('auth_user') || '{}')?.id || 'anonymous'
+                  const newId = generateUUID();
+                  const storageKey = `pipeline_active_dialog_id:${JSON.parse(localStorage.getItem('user_data') || '{}')?.id || 'anonymous'
                     }`;
-                  localStorage.removeItem(storageKey);
-                  navigate('/pipelines');
+                  localStorage.setItem(storageKey, newId);
+                  navigate('/pipelines', { state: { dialogId: newId } });
                   onClose();
                 }}
               >

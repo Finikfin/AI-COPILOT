@@ -55,7 +55,7 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
   initialMessage,
   initialDialogId,
 }) => {
-  const { setPipeline } = usePipelineContext();
+  const { setPipeline, setIsHydrating: setContextHydrating } = usePipelineContext();
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [messages, setMessages] = useState<Message[]>([
@@ -87,6 +87,7 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
 
     const hydrateDialog = async () => {
       setIsHydrating(true);
+      setContextHydrating(true);
       let activeDialogId: string | null = null;
       let shouldLoadHistory = false;
       const storedDialogId = localStorage.getItem(storageKey);
@@ -102,15 +103,9 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
 
       if (initialDialogId) {
         activeDialogId = initialDialogId;
-        // New dialog from Home has no persisted history yet, so skip history prefetch.
-        if (initialMessage) {
-          shouldLoadHistory = false;
-        } else if (dialogsLoaded) {
-          shouldLoadHistory = dialogs.some((dialog) => dialog.dialog_id === initialDialogId);
-        } else {
-          // Fallback when list loading failed: try history for existing dialogs.
-          shouldLoadHistory = true;
-        }
+        // Even if initialMessage is present, someone might have refreshed the page.
+        // We should try to load history first to see if the message was already sent.
+        shouldLoadHistory = true;
       } else if (storedDialogId) {
         if (!dialogsLoaded || dialogs.some((dialog) => dialog.dialog_id === storedDialogId)) {
           activeDialogId = storedDialogId;
@@ -132,8 +127,13 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
 
       if (!shouldLoadHistory) {
         setMessages([{ role: 'assistant', content: DEFAULT_ASSISTANT_MESSAGE }]);
-        setPipeline(null);
+        // Don't reset pipeline immediately if we are switching to a new dialog, 
+        // but only if it's truly a fresh state
+        if (!initialMessage) {
+          setPipeline(null);
+        }
         setIsHydrating(false);
+        setContextHydrating(false);
         return;
       }
 
@@ -171,17 +171,23 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
           }
         } else {
           setMessages([{ role: 'assistant', content: DEFAULT_ASSISTANT_MESSAGE }]);
-          setPipeline(null);
+          // History is empty, but if we have initialMessage, handleSend will call setPipeline soon.
+          if (!initialMessage) {
+            setPipeline(null);
+          }
         }
       } catch (error) {
         if (!cancelled) {
           // Preserve selected dialog ID and show an empty state instead of forcing a new dialog.
           setMessages([{ role: 'assistant', content: DEFAULT_ASSISTANT_MESSAGE }]);
-          setPipeline(null);
+          if (!initialMessage) {
+            setPipeline(null);
+          }
         }
       } finally {
         if (!cancelled) {
           setIsHydrating(false);
+          setContextHydrating(false);
         }
       }
     };
@@ -289,7 +295,12 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
     if (!initialMessage || isHydrating || initialMessageProcessed.current) {
       return;
     }
-    if (messages.length === 1 && messages[0]?.role === 'assistant') {
+    // Only send the initial message if we have no real messages yet (history is empty)
+    const hasRealMessages = 
+      messages.length > 1 || 
+      (messages.length === 1 && messages[0].content !== DEFAULT_ASSISTANT_MESSAGE);
+      
+    if (!hasRealMessages) {
       initialMessageProcessed.current = true;
       handleSend(initialMessage);
     }
