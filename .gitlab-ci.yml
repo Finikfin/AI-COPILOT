@@ -169,7 +169,7 @@ deploy-backend:
         response_body_file="/tmp/register-user-${i}.json"
 
         response_code=$(curl -sS --connect-timeout 5 --max-time 15 -o "$response_body_file" -w "%{http_code}" \
-          -X POST http://127.0.0.1:8000/api/v1/auth/register \
+          -X POST https://team-29-main2-8f6819.pages.prodcontest.ru/api/v1/auth/register \
           -H "Content-Type: application/json" \
           -d "{\"email\":\"${email}\",\"password\":\"${password}\",\"fullName\":\"${full_name}\"}" || echo "000")
         response_code=$(printf "%s" "$response_code" | tr -cd "0-9" | tail -c 3)
