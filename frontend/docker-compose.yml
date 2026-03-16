@@ -2,11 +2,24 @@ services:
   web:
     image: ${DOCKER_IMAGE:-frontend-web}:${TAG:-latest}
     restart: always
+    networks: [shop-network]
+
+  caddy:
+    image: caddy:2
+    restart: always
     ports:
       - "80:80"
-    networks:
-      - shop-network
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [shop-network]
 
 networks:
   shop-network:
     external: true
+
+volumes:
+  caddy_data:
+  caddy_config:

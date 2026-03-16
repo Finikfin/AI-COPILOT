@@ -1,0 +1,4 @@
+team-29-main2-8f6819.pages.prodcontest.ru {
+  encode gzip
+  reverse_proxy web:80
+}
