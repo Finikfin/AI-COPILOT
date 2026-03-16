@@ -1183,7 +1183,10 @@ class PipelineService:
         capabilities: list[Any],
         capabilities_by_id: dict[str, Any],
     ) -> Any | None:
-        if capability_id:
+        has_explicit_capability_ref = (
+            capability_id is not None and str(capability_id).strip() != ""
+        )
+        if has_explicit_capability_ref:
             by_id = capabilities_by_id.get(str(capability_id))
             if by_id is not None:
                 return by_id
@@ -1196,7 +1199,7 @@ class PipelineService:
             if matched is not None:
                 return matched
 
-        if len(capabilities) == 1:
+        if len(capabilities) == 1 and not has_explicit_capability_ref:
             return capabilities[0]
 
         return None
