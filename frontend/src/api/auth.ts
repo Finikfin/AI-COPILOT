@@ -12,6 +12,15 @@ export interface RegisterRequest {
   password: string;
 }
 
+const extractErrorMessage = (errorData: any, fallback: string): string => {
+  return (
+    errorData?.message ||
+    errorData?.detail?.message ||
+    errorData?.detail ||
+    fallback
+  );
+};
+
 /**
  * Log in to the application
  * @param data Login credentials
@@ -27,8 +36,8 @@ export const login = async (data: LoginRequest): Promise<AuthResponse> => {
   });
 
   if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(errorData.detail?.message || "Ошибка входа");
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(extractErrorMessage(errorData, "Login failed"));
   }
 
   return response.json();
@@ -51,8 +60,8 @@ export const register = async (
   });
 
   if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(errorData.detail?.message || "Ошибка регистрации");
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(extractErrorMessage(errorData, "Registration failed"));
   }
 
   return response.json();

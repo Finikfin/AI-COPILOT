@@ -41,7 +41,6 @@ class PipelineGraphEdge(BaseModel):
 class PipelineGenerateRequest(BaseModel):
     dialog_id: UUID
     message: str = Field(min_length=1)
-    user_id: UUID | None = None
     capability_ids: list[UUID] | None = None
 
 

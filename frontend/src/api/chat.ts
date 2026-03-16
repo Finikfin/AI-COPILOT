@@ -5,7 +5,6 @@ import { PipelineNode, PipelineEdge } from '@/types/pipeline';
 export interface GeneratePipelineRequest {
   dialog_id: string;
   message: string;
-  user_id: string | null;
   capability_ids: string[] | null;
 }
 
