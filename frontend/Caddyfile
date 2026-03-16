@@ -1,4 +1,8 @@
 team-29-main2-8f6819.pages.prodcontest.ru {
   encode gzip
+
+  @api path /api/* /docs* /redoc* /openapi.json*
+  reverse_proxy @api api:8000
+
   reverse_proxy web:80
 }
