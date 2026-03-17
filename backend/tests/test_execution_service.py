@@ -372,3 +372,289 @@ async def test_execute_run_is_fail_fast_and_marks_remaining_as_skipped():
     assert session.step_runs_by_step[1].status == ExecutionStepStatus.SUCCEEDED
     assert session.step_runs_by_step[2].status == ExecutionStepStatus.FAILED
     assert session.step_runs_by_step[3].status == ExecutionStepStatus.SKIPPED
+
+
+@pytest.mark.asyncio
+async def test_execute_run_multi_endpoint_node_executes_sequential_chain():
+    run_id = uuid4()
+    pipeline_id = uuid4()
+    action_1_id = uuid4()
+    action_2_id = uuid4()
+    capability_1_id = uuid4()
+    capability_2_id = uuid4()
+
+    action_1 = Action(
+        id=action_1_id,
+        method=HttpMethod.GET,
+        path="/users/recent",
+        base_url="https://api.example.com",
+    )
+    action_2 = Action(
+        id=action_2_id,
+        method=HttpMethod.GET,
+        path="/segments/build",
+        base_url="https://api.example.com",
+        parameters_schema={
+            "type": "object",
+            "required": ["usersList"],
+            "properties": {
+                "usersList": {
+                    "type": "array",
+                    "x-parameter-location": "query",
+                }
+            },
+        },
+    )
+
+    capability_1 = _build_capability(capability_1_id, action_1_id)
+    capability_2 = _build_capability(capability_2_id, action_2_id)
+
+    multi_endpoint_node = {
+        "step": 1,
+        "name": "Multi endpoint node",
+        "external_inputs": [],
+        "endpoints": [
+            {
+                "capability_id": str(capability_1_id),
+                "action_id": str(action_1_id),
+            },
+            {
+                "capability_id": str(capability_2_id),
+                "action_id": str(action_2_id),
+            },
+        ],
+    }
+
+    pipeline = Pipeline(
+        id=pipeline_id,
+        name="Multi endpoint chain",
+        nodes=[multi_endpoint_node],
+        edges=[],
+        status=PipelineStatus.READY,
+    )
+    run = ExecutionRun(
+        id=run_id,
+        pipeline_id=pipeline_id,
+        status=ExecutionRunStatus.QUEUED,
+        inputs={},
+    )
+
+    session = FakeSession(
+        {
+            (ExecutionRun, run_id): run,
+            (Pipeline, pipeline_id): pipeline,
+            (Capability, capability_1_id): capability_1,
+            (Capability, capability_2_id): capability_2,
+            (Action, action_1_id): action_1,
+            (Action, action_2_id): action_2,
+        }
+    )
+    service = ExecutionService(
+        session=session,  # type: ignore[arg-type]
+        context_store=FakeContextStore(initial={"step_outputs": {}, "edge_values": {}}),
+    )
+
+    call_order: list[Any] = []
+
+    async def fake_call_action(action: Action, request_payload: dict[str, Any]):
+        call_order.append(action.id)
+        if action.id == action_1_id:
+            return {"status_code": 200, "body": {"users_list": [{"id": 1}]}}, {"users_list": [{"id": 1}]}
+        assert request_payload["resolved_inputs"]["usersList"] == [{"id": 1}]
+        return {"status_code": 200, "body": {"segments": [1]}}, {"segments": [1]}
+
+    service._call_action = fake_call_action  # type: ignore[method-assign]
+
+    await service.execute_run(run_id)
+
+    assert run.status == ExecutionRunStatus.SUCCEEDED
+    assert run.summary is not None
+    assert run.summary["final_output"] == {"segments": [1]}
+    assert call_order == [action_1_id, action_2_id]
+    assert session.step_runs_by_step[1].capability_id == capability_1_id
+    assert session.step_runs_by_step[1].action_id == action_1_id
+    trace = session.step_runs_by_step[1].response_snapshot["endpoints_trace"]  # type: ignore[index]
+    assert len(trace) == 2
+    assert trace[0]["status"] == "succeeded"
+    assert trace[1]["status"] == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_execute_run_multi_endpoint_failure_stops_pipeline():
+    run_id = uuid4()
+    pipeline_id = uuid4()
+    action_1_id = uuid4()
+    action_2_id = uuid4()
+    action_3_id = uuid4()
+    capability_1_id = uuid4()
+    capability_2_id = uuid4()
+    capability_3_id = uuid4()
+
+    action_1 = _build_action(action_1_id)
+    action_2 = _build_action(action_2_id)
+    action_3 = _build_action(action_3_id)
+    capability_1 = _build_capability(capability_1_id, action_1_id)
+    capability_2 = _build_capability(capability_2_id, action_2_id)
+    capability_3 = _build_capability(capability_3_id, action_3_id)
+
+    multi_endpoint_node = {
+        "step": 1,
+        "name": "Fail on second endpoint",
+        "external_inputs": [],
+        "endpoints": [
+            {"capability_id": str(capability_1_id), "action_id": str(action_1_id)},
+            {"capability_id": str(capability_2_id), "action_id": str(action_2_id)},
+        ],
+    }
+
+    pipeline = Pipeline(
+        id=pipeline_id,
+        name="Failing multi-endpoint pipeline",
+        nodes=[
+            multi_endpoint_node,
+            _build_node(2, capability_3_id, action_3_id),
+        ],
+        edges=[{"from_step": 1, "to_step": 2, "type": "segments"}],
+        status=PipelineStatus.READY,
+    )
+    run = ExecutionRun(
+        id=run_id,
+        pipeline_id=pipeline_id,
+        status=ExecutionRunStatus.QUEUED,
+        inputs={},
+    )
+
+    session = FakeSession(
+        {
+            (ExecutionRun, run_id): run,
+            (Pipeline, pipeline_id): pipeline,
+            (Capability, capability_1_id): capability_1,
+            (Capability, capability_2_id): capability_2,
+            (Capability, capability_3_id): capability_3,
+            (Action, action_1_id): action_1,
+            (Action, action_2_id): action_2,
+            (Action, action_3_id): action_3,
+        }
+    )
+    service = ExecutionService(
+        session=session,  # type: ignore[arg-type]
+        context_store=FakeContextStore(initial={"step_outputs": {}, "edge_values": {}}),
+    )
+
+    async def fake_call_action(action: Action, _request_payload: dict[str, Any]):
+        if action.id == action_2_id:
+            raise StepExecutionError("boom")
+        return {"status_code": 200, "body": {"segments": [1]}}, {"segments": [1]}
+
+    service._call_action = fake_call_action  # type: ignore[method-assign]
+
+    await service.execute_run(run_id)
+
+    assert run.status == ExecutionRunStatus.FAILED
+    assert run.summary is not None
+    assert run.summary["succeeded_steps"] == 0
+    assert run.summary["failed_steps"] == 1
+    assert run.summary["skipped_steps"] == 1
+    assert session.step_runs_by_step[1].status == ExecutionStepStatus.FAILED
+    assert session.step_runs_by_step[2].status == ExecutionStepStatus.SKIPPED
+    failed_trace = session.step_runs_by_step[1].response_snapshot["endpoints_trace"]  # type: ignore[index]
+    assert len(failed_trace) == 2
+    assert failed_trace[0]["status"] == "succeeded"
+    assert failed_trace[1]["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_execute_run_multi_endpoint_chain_supports_composite_endpoint():
+    run_id = uuid4()
+    pipeline_id = uuid4()
+    action_1_id = uuid4()
+    atomic_capability_id = uuid4()
+    composite_capability_id = uuid4()
+
+    action_1 = Action(
+        id=action_1_id,
+        method=HttpMethod.GET,
+        path="/users/recent",
+        base_url="https://api.example.com",
+    )
+    atomic_capability = _build_capability(atomic_capability_id, action_1_id)
+    composite_capability = Capability(
+        id=composite_capability_id,
+        action_id=None,
+        type="COMPOSITE",
+        name="composite_cap",
+        input_schema={
+            "type": "object",
+            "required": ["users"],
+            "properties": {
+                "users": {"type": "array"},
+            },
+        },
+        recipe={"version": 1, "steps": [{"step": 1, "capability_id": str(atomic_capability_id), "inputs": {}}]},
+    )
+
+    node = {
+        "step": 1,
+        "name": "Atomic then composite",
+        "external_inputs": [],
+        "endpoints": [
+            {"capability_id": str(atomic_capability_id), "action_id": str(action_1_id)},
+            {"capability_id": str(composite_capability_id), "action_id": None},
+        ],
+    }
+    pipeline = Pipeline(
+        id=pipeline_id,
+        name="mixed chain pipeline",
+        nodes=[node],
+        edges=[],
+        status=PipelineStatus.READY,
+    )
+    run = ExecutionRun(
+        id=run_id,
+        pipeline_id=pipeline_id,
+        status=ExecutionRunStatus.QUEUED,
+        inputs={},
+    )
+
+    session = FakeSession(
+        {
+            (ExecutionRun, run_id): run,
+            (Pipeline, pipeline_id): pipeline,
+            (Capability, atomic_capability_id): atomic_capability,
+            (Capability, composite_capability_id): composite_capability,
+            (Action, action_1_id): action_1,
+        }
+    )
+    service = ExecutionService(
+        session=session,  # type: ignore[arg-type]
+        context_store=FakeContextStore(initial={"step_outputs": {}, "edge_values": {}}),
+    )
+
+    async def fake_call_action(action: Action, _request_payload: dict[str, Any]):
+        assert action.id == action_1_id
+        return {"status_code": 200, "body": {"users": [{"id": 1}]}}, {"users": [{"id": 1}]}
+
+    async def fake_execute_composite_capability(
+        *,
+        capability: Capability,
+        resolved_inputs: dict[str, Any],
+        run_inputs: dict[str, Any],
+    ):
+        assert capability.id == composite_capability_id
+        assert resolved_inputs["users"] == [{"id": 1}]
+        assert run_inputs == {}
+        return {"capability_type": "COMPOSITE", "status_code": 200}, {"segments": [1]}
+
+    service._call_action = fake_call_action  # type: ignore[method-assign]
+    service._execute_composite_capability = fake_execute_composite_capability  # type: ignore[method-assign]
+
+    await service.execute_run(run_id)
+
+    assert run.status == ExecutionRunStatus.SUCCEEDED
+    assert run.summary is not None
+    assert run.summary["final_output"] == {"segments": [1]}
+    trace = session.step_runs_by_step[1].response_snapshot["endpoints_trace"]  # type: ignore[index]
+    assert len(trace) == 2
+    assert trace[0]["capability_id"] == str(atomic_capability_id)
+    assert trace[1]["capability_id"] == str(composite_capability_id)
+    assert trace[1]["capability_type"] == "COMPOSITE"

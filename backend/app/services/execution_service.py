@@ -225,9 +225,6 @@ class ExecutionService:
             await self.session.commit()
 
             try:
-                capability_id, capability = await self._get_capability_from_node(node)
-                capability_type = self._capability_type_value(capability)
-                step_run.capability_id = capability_id
                 resolved_inputs, _missing_external = self._resolve_node_inputs(
                     node=node,
                     incoming_edges=incoming,
@@ -235,36 +232,38 @@ class ExecutionService:
                     edge_values=edge_values,
                     run_inputs=run.inputs or {},
                 )
-                if capability_type == CapabilityType.COMPOSITE.value:
-                    request_payload = {
-                        "resolved_inputs": resolved_inputs,
-                        "request_snapshot": {
-                            "capability_type": capability_type,
-                            "recipe_version": (
-                                capability.recipe.get("version")
-                                if isinstance(capability.recipe, dict)
-                                else None
-                            ),
-                        },
-                    }
-                    response_snapshot, output_payload = await self._execute_composite_capability(
-                        capability=capability,
+                request_payload = {
+                    "resolved_inputs": dict(resolved_inputs),
+                    "request_snapshot": {
+                        "chain_mode": "sequential_endpoints",
+                        "endpoints_trace": [],
+                    },
+                }
+                try:
+                    (
+                        request_payload,
+                        response_snapshot,
+                        output_payload,
+                        primary_capability_id,
+                        primary_action_id,
+                    ) = await self._execute_node_endpoint_chain(
+                        node=node,
                         resolved_inputs=resolved_inputs,
                         run_inputs=run.inputs or {},
                     )
-                    step_run.action_id = None
-                else:
-                    action = await self._get_action_from_capability(capability_id, capability)
-                    step_run.action_id = action.id
-                    request_payload = self._build_request_payload(
-                        action=action,
-                        resolved_inputs=resolved_inputs,
+                except StepExecutionError as chain_exc:
+                    chain_snapshot = (
+                        chain_exc.response_snapshot
+                        if isinstance(chain_exc.response_snapshot, dict)
+                        else {}
                     )
-                    missing_required = sorted(set(request_payload["missing_required"]))
-                    if missing_required:
-                        raise StepExecutionError(f"Missing inputs: {missing_required}")
+                    chain_trace = chain_snapshot.get("endpoints_trace")
+                    if isinstance(chain_trace, list):
+                        request_payload["request_snapshot"]["endpoints_trace"] = chain_trace
+                    raise
 
-                    response_snapshot, output_payload = await self._call_action(action, request_payload)
+                step_run.capability_id = primary_capability_id
+                step_run.action_id = primary_action_id
 
                 step_outputs[str(step)] = output_payload
                 context["step_outputs"] = step_outputs
@@ -430,8 +429,307 @@ class ExecutionService:
     def _build_edge_value_key(from_step: int, to_step: int, edge_type: str) -> str:
         return f"{from_step}:{to_step}:{edge_type}"
 
-    async def _get_capability_from_node(self, node: dict[str, Any]) -> tuple[uuid.UUID, Capability]:
-        endpoint = self._get_primary_endpoint(node)
+    async def _execute_node_endpoint_chain(
+        self,
+        *,
+        node: dict[str, Any],
+        resolved_inputs: dict[str, Any],
+        run_inputs: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any], Any, uuid.UUID | None, uuid.UUID | None]:
+        endpoints = self._get_node_endpoints(node)
+        if not endpoints:
+            raise StepExecutionError("Node endpoint does not have a valid capability_id")
+
+        endpoints_trace: list[dict[str, Any]] = []
+        chain_scope = dict(resolved_inputs)
+        protected_inputs = set(resolved_inputs.keys())
+        previous_output: Any = None
+        final_output: Any = None
+        final_request_snapshot: dict[str, Any] | None = None
+        final_response_snapshot: dict[str, Any] | None = None
+        primary_capability_id: uuid.UUID | None = None
+        primary_action_id: uuid.UUID | None = None
+
+        for endpoint_index, endpoint in enumerate(endpoints, start=1):
+            capability_uuid, capability = await self._get_capability_from_endpoint(endpoint)
+            if primary_capability_id is None:
+                primary_capability_id = capability_uuid
+
+            capability_type = self._capability_type_value(capability)
+            trace_item: dict[str, Any] = {
+                "endpoint_index": endpoint_index,
+                "capability_id": str(capability_uuid),
+                "capability_type": capability_type,
+            }
+
+            if capability_type == CapabilityType.COMPOSITE.value:
+                expected_inputs = self._collect_expected_input_names(capability=capability)
+                endpoint_inputs = self._apply_chained_output_inputs(
+                    base_scope=chain_scope,
+                    previous_output=previous_output,
+                    expected_inputs=expected_inputs,
+                    protected_inputs=protected_inputs,
+                )
+                composite_request_snapshot = {
+                    "capability_type": capability_type,
+                    "recipe_version": (
+                        capability.recipe.get("version")
+                        if isinstance(capability.recipe, dict)
+                        else None
+                    ),
+                }
+                trace_item["resolved_inputs"] = endpoint_inputs
+                trace_item["request_snapshot"] = composite_request_snapshot
+                try:
+                    endpoint_response, endpoint_output = await self._execute_composite_capability(
+                        capability=capability,
+                        resolved_inputs=endpoint_inputs,
+                        run_inputs=run_inputs,
+                    )
+                except StepExecutionError as exc:
+                    trace_item["status"] = "failed"
+                    trace_item["response_snapshot"] = exc.response_snapshot
+                    trace_item["error"] = str(exc)
+                    endpoints_trace.append(trace_item)
+                    raise StepExecutionError(
+                        f"Endpoint {endpoint_index} failed: {exc}",
+                        response_snapshot={"endpoints_trace": endpoints_trace},
+                    ) from exc
+
+                trace_item["status"] = "succeeded"
+                trace_item["response_snapshot"] = endpoint_response
+                endpoints_trace.append(trace_item)
+                final_request_snapshot = composite_request_snapshot
+                final_response_snapshot = endpoint_response
+                final_output = endpoint_output
+                previous_output = endpoint_output
+                chain_scope = endpoint_inputs
+                continue
+
+            action = await self._get_action_from_capability(capability_uuid, capability)
+            if endpoint_index == 1 and primary_action_id is None:
+                primary_action_id = action.id
+
+            expected_inputs = self._collect_expected_input_names(
+                capability=capability,
+                action=action,
+            )
+            endpoint_inputs = self._apply_chained_output_inputs(
+                base_scope=chain_scope,
+                previous_output=previous_output,
+                expected_inputs=expected_inputs,
+                protected_inputs=protected_inputs,
+            )
+            step_request = self._build_request_payload(
+                action=action,
+                resolved_inputs=endpoint_inputs,
+            )
+            missing_required = sorted(set(step_request["missing_required"]))
+            trace_item["action_id"] = str(action.id)
+            trace_item["resolved_inputs"] = endpoint_inputs
+            trace_item["request_snapshot"] = step_request.get("request_snapshot")
+
+            if missing_required:
+                trace_item["status"] = "failed"
+                trace_item["missing_required"] = missing_required
+                endpoints_trace.append(trace_item)
+                raise StepExecutionError(
+                    f"Endpoint {endpoint_index} missing required inputs: {missing_required}",
+                    response_snapshot={"endpoints_trace": endpoints_trace},
+                )
+
+            try:
+                endpoint_response, endpoint_output = await self._call_action(action, step_request)
+            except StepExecutionError as exc:
+                trace_item["status"] = "failed"
+                trace_item["response_snapshot"] = exc.response_snapshot
+                trace_item["error"] = str(exc)
+                endpoints_trace.append(trace_item)
+                raise StepExecutionError(
+                    f"Endpoint {endpoint_index} failed: {exc}",
+                    response_snapshot={"endpoints_trace": endpoints_trace},
+                ) from exc
+
+            trace_item["status"] = "succeeded"
+            trace_item["response_snapshot"] = endpoint_response
+            endpoints_trace.append(trace_item)
+            final_request_snapshot = step_request.get("request_snapshot")
+            final_response_snapshot = endpoint_response
+            final_output = endpoint_output
+            previous_output = endpoint_output
+            chain_scope = endpoint_inputs
+
+        request_snapshot = (
+            dict(final_request_snapshot)
+            if isinstance(final_request_snapshot, dict)
+            else {}
+        )
+        request_snapshot["chain_mode"] = "sequential_endpoints"
+        request_snapshot["endpoints_trace"] = endpoints_trace
+
+        response_snapshot = (
+            dict(final_response_snapshot)
+            if isinstance(final_response_snapshot, dict)
+            else {}
+        )
+        response_snapshot["endpoints_trace"] = endpoints_trace
+        if "body" not in response_snapshot:
+            response_snapshot["body"] = final_output
+
+        request_payload = {
+            "resolved_inputs": dict(resolved_inputs),
+            "request_snapshot": request_snapshot,
+        }
+        return (
+            request_payload,
+            response_snapshot,
+            final_output,
+            primary_capability_id,
+            primary_action_id,
+        )
+
+    def _apply_chained_output_inputs(
+        self,
+        *,
+        base_scope: dict[str, Any],
+        previous_output: Any,
+        expected_inputs: list[str],
+        protected_inputs: set[str] | None = None,
+    ) -> dict[str, Any]:
+        merged = dict(base_scope)
+        protected = protected_inputs or set()
+        if previous_output is None:
+            return merged
+
+        for expected_input in expected_inputs:
+            if expected_input in merged and expected_input in protected:
+                continue
+            resolved = self._resolve_expected_input_from_output(
+                output=previous_output,
+                expected_input=expected_input,
+            )
+            if resolved is not None:
+                merged[expected_input] = resolved
+        return merged
+
+    def _collect_expected_input_names(
+        self,
+        *,
+        capability: Capability | None = None,
+        action: Action | None = None,
+    ) -> list[str]:
+        names: list[str] = []
+        seen: set[str] = set()
+
+        def add_name(raw_name: Any) -> None:
+            if not isinstance(raw_name, (str, int)):
+                return
+            name = str(raw_name).strip()
+            if not name or name in seen:
+                return
+            names.append(name)
+            seen.add(name)
+
+        if capability is not None and isinstance(capability.input_schema, dict):
+            for name in self._collect_schema_input_names(capability.input_schema):
+                add_name(name)
+
+        if action is not None:
+            for schema in (action.parameters_schema, action.request_body_schema):
+                if not isinstance(schema, dict):
+                    continue
+                for name in self._collect_schema_input_names(schema):
+                    add_name(name)
+
+        return names
+
+    @staticmethod
+    def _collect_schema_input_names(schema: dict[str, Any]) -> list[str]:
+        names: list[str] = []
+        required = schema.get("required")
+        if isinstance(required, list):
+            names.extend(str(item) for item in required if isinstance(item, (str, int)))
+        properties = schema.get("properties")
+        if isinstance(properties, dict):
+            names.extend(
+                str(name) for name in properties.keys() if isinstance(name, (str, int))
+            )
+
+        deduplicated: list[str] = []
+        seen: set[str] = set()
+        for name in names:
+            normalized = str(name).strip()
+            if not normalized or normalized in seen:
+                continue
+            deduplicated.append(normalized)
+            seen.add(normalized)
+        return deduplicated
+
+    def _resolve_expected_input_from_output(self, *, output: Any, expected_input: str) -> Any:
+        if isinstance(output, dict):
+            if expected_input in output:
+                return output[expected_input]
+            expected_base = expected_input[:-2] if expected_input.endswith("[]") else expected_input
+            if expected_base in output:
+                return output[expected_base]
+            for field_name, field_value in output.items():
+                if not isinstance(field_name, str):
+                    continue
+                if self._field_alias_matches(
+                    field_name=field_name,
+                    expected_input=expected_input,
+                ):
+                    return field_value
+
+        fallback = self._extract_value_from_output(output, expected_input)
+        return fallback
+
+    def _field_alias_matches(self, *, field_name: str, expected_input: str) -> bool:
+        left = str(field_name).strip()
+        right = str(expected_input).strip()
+        if not left or not right:
+            return False
+        if left == right:
+            return True
+
+        left_base = left[:-2] if left.endswith("[]") else left
+        right_base = right[:-2] if right.endswith("[]") else right
+        if left_base == right_base:
+            return True
+
+        left_normalized = self._normalize_lookup_token(left_base)
+        right_normalized = self._normalize_lookup_token(right_base)
+        if left_normalized and right_normalized and left_normalized == right_normalized:
+            return True
+
+        left_tokens = self._tokenize_field_name(left_base)
+        right_tokens = self._tokenize_field_name(right_base)
+        return bool(left_tokens and right_tokens and left_tokens == right_tokens)
+
+    @staticmethod
+    def _tokenize_field_name(value: str) -> set[str]:
+        normalized = re.sub(r"([a-z])([A-Z])", r"\1 \2", str(value))
+        normalized = normalized.replace("_", " ").replace("-", " ")
+        tokens = {
+            token
+            for token in re.findall(r"[a-zA-Z0-9]+", normalized.lower())
+            if token
+        }
+        singularized = {
+            token[:-1]
+            for token in tokens
+            if token.endswith("s") and len(token) > 3
+        }
+        return tokens | singularized
+
+    @staticmethod
+    def _normalize_lookup_token(value: str) -> str:
+        return re.sub(r"[^a-zA-Z0-9]+", "", str(value).lower())
+
+    async def _get_capability_from_endpoint(
+        self,
+        endpoint: dict[str, Any],
+    ) -> tuple[uuid.UUID, Capability]:
         capability_id = endpoint.get("capability_id") if isinstance(endpoint, dict) else None
         capability_uuid = self._to_uuid(capability_id)
         if capability_uuid is None:
@@ -441,6 +739,12 @@ class ExecutionService:
         if capability is None:
             raise StepExecutionError(f"Capability not found: {capability_uuid}")
         return capability_uuid, capability
+
+    async def _get_capability_from_node(self, node: dict[str, Any]) -> tuple[uuid.UUID, Capability]:
+        endpoints = self._get_node_endpoints(node)
+        if not endpoints:
+            raise StepExecutionError("Node endpoint does not have a valid capability_id")
+        return await self._get_capability_from_endpoint(endpoints[0])
 
     async def _get_action_from_capability(
         self,
@@ -472,9 +776,10 @@ class ExecutionService:
         *,
         status: ExecutionStepStatus,
     ) -> ExecutionStepRun:
-        endpoint = self._get_primary_endpoint(node)
-        capability_id = self._to_uuid(endpoint.get("capability_id")) if isinstance(endpoint, dict) else None
-        action_id = self._to_uuid(endpoint.get("action_id")) if isinstance(endpoint, dict) else None
+        endpoints = self._get_node_endpoints(node)
+        endpoint = endpoints[0] if endpoints else {}
+        capability_id = self._to_uuid(endpoint.get("capability_id"))
+        action_id = self._to_uuid(endpoint.get("action_id"))
         return ExecutionStepRun(
             run_id=run_id,
             step=self._safe_int(node.get("step"), fallback=0),
@@ -1056,11 +1361,11 @@ class ExecutionService:
         return ordered
 
     @staticmethod
-    def _get_primary_endpoint(node: dict[str, Any]) -> dict[str, Any]:
+    def _get_node_endpoints(node: dict[str, Any]) -> list[dict[str, Any]]:
         endpoints = node.get("endpoints")
-        if isinstance(endpoints, list) and endpoints and isinstance(endpoints[0], dict):
-            return endpoints[0]
-        return {}
+        if not isinstance(endpoints, list):
+            return []
+        return [item for item in endpoints if isinstance(item, dict)]
 
     @staticmethod
     def _normalize_str_list(value: Any) -> list[str]:

@@ -1079,6 +1079,8 @@ class PipelineService:
             self._register_step_alias(step_map, step, step)
 
             capability_id_raw = raw_node.get("capability_id")
+            raw_endpoints = raw_node.get("endpoints")
+            has_raw_endpoints = isinstance(raw_endpoints, list) and bool(raw_endpoints)
             cap = self._resolve_capability_for_node(
                 raw_node=raw_node,
                 capability_id=capability_id_raw,
@@ -1090,29 +1092,18 @@ class PipelineService:
             )
             if has_explicit_capability_ref and cap is None:
                 issues.append("graph:invalid_capability_ref")
-            elif cap is None and len(capabilities) > 1:
+            elif cap is None and len(capabilities) > 1 and not has_raw_endpoints:
                 issues.append("graph:missing_capability_ref")
 
-            if cap is None:
-                endpoints_payload = []
-            else:
-                cap_type = getattr(cap, "type", None)
-                if hasattr(cap_type, "value"):
-                    cap_type_value = cap_type.value
-                elif cap_type is None:
-                    cap_type_value = None
-                else:
-                    cap_type_value = str(cap_type)
-                endpoints_payload = [
-                    {
-                        "name": cap.name,
-                        "capability_id": str(cap.id),
-                        "action_id": str(cap.action_id) if cap.action_id is not None else None,
-                        "type": cap_type_value,
-                        "input_type": cap.input_schema,
-                        "output_type": cap.output_schema,
-                    }
-                ]
+            endpoints_payload = self._resolve_endpoints_for_node(
+                raw_node=raw_node,
+                fallback_capability=cap,
+                capabilities=capabilities,
+                capabilities_by_id=capabilities_by_id,
+                issues=issues,
+            )
+            if not endpoints_payload and cap is not None:
+                endpoints_payload = [self._build_endpoint_payload(cap)]
 
             normalized_nodes.append(
                 {
@@ -1168,6 +1159,87 @@ class PipelineService:
             )
 
         return normalized_nodes, normalized_edges, sorted(set(issues))
+
+    def _resolve_endpoints_for_node(
+        self,
+        *,
+        raw_node: dict[str, Any],
+        fallback_capability: Any | None,
+        capabilities: list[Any],
+        capabilities_by_id: dict[str, Any],
+        issues: list[str],
+    ) -> list[dict[str, Any]]:
+        raw_endpoints = raw_node.get("endpoints")
+        if not isinstance(raw_endpoints, list):
+            return []
+
+        resolved_endpoints: list[dict[str, Any]] = []
+        fallback_capability_id = raw_node.get("capability_id")
+        fallback_capability_str = (
+            str(fallback_capability_id).strip()
+            if fallback_capability_id is not None
+            else ""
+        )
+        fallback_from_node = (
+            capabilities_by_id.get(fallback_capability_str)
+            if fallback_capability_str
+            else None
+        )
+
+        for raw_endpoint in raw_endpoints:
+            if not isinstance(raw_endpoint, dict):
+                issues.append("graph:invalid_capability_ref")
+                continue
+
+            endpoint_capability_id = raw_endpoint.get("capability_id")
+            endpoint_capability: Any | None = None
+            if endpoint_capability_id is not None and str(endpoint_capability_id).strip():
+                endpoint_capability = capabilities_by_id.get(str(endpoint_capability_id).strip())
+            elif fallback_from_node is not None:
+                endpoint_capability = fallback_from_node
+            elif fallback_capability is not None:
+                endpoint_capability = fallback_capability
+            elif len(capabilities) == 1:
+                endpoint_capability = capabilities[0]
+
+            if endpoint_capability is None:
+                issues.append("graph:invalid_capability_ref")
+                continue
+
+            resolved_endpoints.append(
+                self._build_endpoint_payload(endpoint_capability, raw_endpoint=raw_endpoint)
+            )
+
+        return resolved_endpoints
+
+    def _build_endpoint_payload(
+        self,
+        capability: Any,
+        *,
+        raw_endpoint: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        cap_type = getattr(capability, "type", None)
+        if hasattr(cap_type, "value"):
+            cap_type_value = cap_type.value
+        elif cap_type is None:
+            cap_type_value = None
+        else:
+            cap_type_value = str(cap_type)
+
+        endpoint_name = None
+        if isinstance(raw_endpoint, dict):
+            raw_name = raw_endpoint.get("name")
+            if isinstance(raw_name, str) and raw_name.strip():
+                endpoint_name = raw_name.strip()
+
+        return {
+            "name": endpoint_name or capability.name,
+            "capability_id": str(capability.id),
+            "action_id": str(capability.action_id) if capability.action_id is not None else None,
+            "type": cap_type_value,
+            "input_type": capability.input_schema,
+            "output_type": capability.output_schema,
+        }
 
     def _review_graph_with_llm(
         self,
@@ -1870,12 +1942,16 @@ class PipelineService:
         endpoints = node.get("endpoints") or []
         if not endpoints:
             return None
-        endpoint = endpoints[0]
-        raw = endpoint.get(field)
-        if isinstance(raw, str):
-            return raw
-        if isinstance(raw, dict):
-            return raw.get("type") if isinstance(raw.get("type"), str) else None
+        for endpoint in endpoints:
+            if not isinstance(endpoint, dict):
+                continue
+            raw = endpoint.get(field)
+            if isinstance(raw, str) and raw.strip():
+                return raw
+            if isinstance(raw, dict):
+                endpoint_type = raw.get("type")
+                if isinstance(endpoint_type, str) and endpoint_type.strip():
+                    return endpoint_type
         return None
 
     def _extract_required_inputs(
@@ -1940,12 +2016,21 @@ class PipelineService:
         endpoints = node.get("endpoints") or []
         if not endpoints:
             return []
-        input_type = endpoints[0].get("input_type")
-        return (
-            self._extract_required_inputs(input_type)
-            if isinstance(input_type, dict)
-            else []
-        )
+        required_inputs: list[str] = []
+        seen: set[str] = set()
+        for endpoint in endpoints:
+            if not isinstance(endpoint, dict):
+                continue
+            input_type = endpoint.get("input_type")
+            if not isinstance(input_type, dict):
+                continue
+            for input_name in self._extract_required_inputs(input_type):
+                normalized = str(input_name).strip()
+                if not normalized or normalized in seen:
+                    continue
+                seen.add(normalized)
+                required_inputs.append(normalized)
+        return required_inputs
 
     def _normalize_int_list(self, value: Any) -> list[int]:
         if not isinstance(value, list):
