@@ -274,6 +274,7 @@ async def assign_users_to_hotels(payload: AssignmentsRequest) -> AssignmentsResp
 @app.post(
     "/emails/send-offers",
     response_model=EmailOfferResponse,
+    status_code=200,
     operation_id="sendHotelOffersByEmail",
     tags=["travel-offer-workflow"],
 )
