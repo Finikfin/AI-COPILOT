@@ -3,10 +3,10 @@ export const API_BASE_URL = '/api/v1';
 export const ENDPOINTS = {
   ACTIONS: {
     INGEST: `${API_BASE_URL}/actions/ingest`,
-    LIST: `${API_BASE_URL}/actions`,
+    LIST: `${API_BASE_URL}/actions/`,
   },
   CAPABILITIES: {
-    LIST: `${API_BASE_URL}/capabilities`,
+    LIST: `${API_BASE_URL}/capabilities/`,
     CREATE_COMPOSITE: `${API_BASE_URL}/capabilities/composite`,
   },
   AUTH: {

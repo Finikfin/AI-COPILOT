@@ -64,7 +64,23 @@ def _extract_output_payload(response_snapshot: dict[str, Any] | None) -> Any:
 
 
 def _build_step_run_response(step_run: ExecutionStepRun) -> ExecutionStepRunResponse:
-    base = ExecutionStepRunResponse.model_validate(step_run, from_attributes=True)
+    status_value = step_run.status.value if hasattr(step_run.status, "value") else step_run.status
+    base = ExecutionStepRunResponse(
+        step=step_run.step,
+        name=step_run.name,
+        capability_id=step_run.capability_id,
+        action_id=step_run.action_id,
+        status=status_value,
+        resolved_inputs=step_run.resolved_inputs,
+        request_snapshot=step_run.request_snapshot,
+        response_snapshot=step_run.response_snapshot,
+        error=step_run.error,
+        started_at=step_run.started_at,
+        finished_at=step_run.finished_at,
+        duration_ms=step_run.duration_ms,
+        created_at=step_run.created_at,
+        updated_at=step_run.updated_at,
+    )
     request_snapshot = base.request_snapshot if isinstance(base.request_snapshot, dict) else None
     response_snapshot = base.response_snapshot if isinstance(base.response_snapshot, dict) else None
     method = _extract_method(request_snapshot)

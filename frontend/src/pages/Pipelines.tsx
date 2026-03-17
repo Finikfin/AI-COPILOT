@@ -1,17 +1,22 @@
 import React from 'react';
 import { useLocation } from 'react-router-dom';
 import ReactFlow, {
+  BaseEdge,
   Background,
   Connection,
   Controls,
   Edge,
+  EdgeLabelRenderer,
+  EdgeProps,
   Handle,
   MarkerType,
   Node,
   NodeChange,
   NodeProps,
   Position,
+  ReactFlowInstance,
   applyNodeChanges,
+  getBezierPath,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { SynthesisChat } from '@/components/shared/SynthesisChat';
@@ -36,6 +41,9 @@ import {
   Loader2,
   X,
   Trash2,
+  Plus,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { usePipelineContext } from '@/contexts/PipelineContext';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -80,6 +88,7 @@ const COLUMN_GAP = 130;
 const ROW_GAP = 72;
 const PADDING_X = 48;
 const PADDING_Y = 32;
+const NEW_NODE_DRAG_TYPE = 'application/x-pipeline-node';
 
 const TERMINAL_RUN_STATUSES: ExecutionRunStatus[] = [
   'SUCCEEDED',
@@ -191,6 +200,105 @@ export const formatPayload = (payload: unknown): string => {
   } catch {
     return String(payload);
   }
+};
+
+type PayloadView = {
+  raw: string;
+  display: string;
+  kind: 'json' | 'text';
+};
+
+const buildPayloadView = (payload: unknown): PayloadView => {
+  if (payload === null || payload === undefined) {
+    return {
+      raw: 'нет данных',
+      display: 'нет данных',
+      kind: 'text',
+    };
+  }
+
+  if (typeof payload === 'string') {
+    const trimmed = payload.trim();
+    if (!trimmed) {
+      return {
+        raw: 'нет данных',
+        display: 'нет данных',
+        kind: 'text',
+      };
+    }
+
+    try {
+      const parsed = JSON.parse(trimmed);
+      const pretty = JSON.stringify(parsed, null, 2);
+      return {
+        raw: pretty,
+        display: pretty,
+        kind: 'json',
+      };
+    } catch {
+      return {
+        raw: payload,
+        display: payload,
+        kind: 'text',
+      };
+    }
+  }
+
+  try {
+    const pretty = JSON.stringify(payload, null, 2);
+    return {
+      raw: pretty,
+      display: pretty,
+      kind: 'json',
+    };
+  } catch {
+    const fallback = String(payload);
+    return {
+      raw: fallback,
+      display: fallback,
+      kind: 'text',
+    };
+  }
+};
+
+const PayloadViewer: React.FC<{ payload: unknown }> = ({ payload }) => {
+  const [copied, setCopied] = React.useState(false);
+  const view = React.useMemo(() => buildPayloadView(payload), [payload]);
+
+  const handleCopy = React.useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(view.raw);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    } catch {
+      toast.error('Не удалось скопировать');
+    }
+  }, [view.raw]);
+
+  return (
+    <div className="rounded-xl border border-border/60 bg-gradient-to-b from-zinc-50/80 to-zinc-100/30 p-2 dark:from-zinc-900/60 dark:to-zinc-900/20">
+      <div className="mb-2 flex items-center justify-between gap-2 px-1">
+        <Badge
+          variant="outline"
+          className="h-5 border-zinc-300/70 bg-white/80 px-2 text-[10px] font-semibold uppercase tracking-wide text-zinc-700"
+        >
+          {view.kind}
+        </Badge>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 gap-1 px-2 text-[10px] text-zinc-600 hover:bg-zinc-200/60"
+          onClick={handleCopy}
+        >
+          {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+          {copied ? 'Copied' : 'Copy'}
+        </Button>
+      </div>
+      <pre className="max-h-48 overflow-auto rounded-lg border border-zinc-200/70 bg-white/70 p-3 text-[11px] leading-relaxed text-zinc-700">
+        {view.display}
+      </pre>
+    </div>
+  );
 };
 
 const buildLayoutStorageKey = (pipelineId: string) =>
@@ -377,6 +485,113 @@ const parseLayout = (raw: string | null): Record<number, { x: number; y: number 
   }
 };
 
+const createDraftPipelineNode = (step: number): PipelineNode => ({
+  step,
+  name: `Custom Step ${step}`,
+  description: 'Новый шаг (перетащите и настройте связи)',
+  input_connected_from: [],
+  output_connected_to: [],
+  input_data_type_from_previous: [],
+  external_inputs: [],
+  endpoints: [],
+});
+
+const getNextStepNumber = (nodes: Array<Node<PipelineCanvasNodeData>>): number => {
+  const maxStep = nodes.reduce((max, node) => {
+    const step = Number(node.id);
+    if (!Number.isInteger(step)) {
+      return max;
+    }
+    return Math.max(max, step);
+  }, 0);
+  return maxStep + 1;
+};
+
+const resolveDropPosition = (
+  reactFlowInstance: ReactFlowInstance,
+  event: React.DragEvent,
+  wrapperBounds: DOMRect
+) => {
+  const instance = reactFlowInstance as ReactFlowInstance & {
+    screenToFlowPosition?: (position: { x: number; y: number }) => { x: number; y: number };
+    project?: (position: { x: number; y: number }) => { x: number; y: number };
+  };
+
+  if (typeof instance.screenToFlowPosition === 'function') {
+    return instance.screenToFlowPosition({
+      x: event.clientX,
+      y: event.clientY,
+    });
+  }
+
+  if (typeof instance.project === 'function') {
+    return instance.project({
+      x: event.clientX - wrapperBounds.left,
+      y: event.clientY - wrapperBounds.top,
+    });
+  }
+
+  return {
+    x: event.clientX - wrapperBounds.left,
+    y: event.clientY - wrapperBounds.top,
+  };
+};
+
+const PipelineFlowEdge = ({
+  id,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  sourcePosition,
+  targetPosition,
+  markerEnd,
+  data,
+  label,
+}: EdgeProps<PipelineCanvasEdgeData>) => {
+  const [edgePath, labelX, labelY] = getBezierPath({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition,
+    targetPosition,
+  });
+  const edgeType = String(data?.edgeType ?? label ?? '').trim();
+
+  return (
+    <>
+      <BaseEdge
+        id={id}
+        path={edgePath}
+        markerEnd={markerEnd}
+        style={{
+          stroke: '#22c55e',
+          strokeWidth: 3,
+        }}
+      />
+      <EdgeLabelRenderer>
+        <div
+          style={{
+            position: 'absolute',
+            transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
+            pointerEvents: 'none',
+          }}
+        >
+          <div className="relative flex items-center justify-center">
+            {edgeType ? (
+              <span className="absolute -top-5 whitespace-nowrap text-[11px] font-semibold text-zinc-200">
+                {edgeType}
+              </span>
+            ) : null}
+            <span className="h-3.5 w-3.5 rounded-full bg-emerald-500 shadow-[0_0_0_4px_rgba(34,197,94,0.18)]" />
+          </div>
+        </div>
+      </EdgeLabelRenderer>
+    </>
+  );
+};
+
 const toCanvasEdge = (
   edge: PipelineEdge,
   index: number
@@ -384,18 +599,20 @@ const toCanvasEdge = (
   id: edgeIdFrom(edge, index),
   source: String(edge.from_step),
   target: String(edge.to_step),
-  type: 'smoothstep',
+  type: 'pipelineFlowEdge',
   label: edge.type,
   data: {
     edgeType: edge.type,
   },
   markerEnd: {
     type: MarkerType.ArrowClosed,
-    width: 16,
-    height: 16,
+    width: 18,
+    height: 18,
+    color: '#22c55e',
   },
   style: {
-    strokeWidth: 2,
+    stroke: '#22c55e',
+    strokeWidth: 3,
   },
   labelStyle: {
     fontSize: 11,
@@ -577,6 +794,10 @@ const nodeTypes = {
   pipelineStep: PipelineStepNode,
 };
 
+const edgeTypes = {
+  pipelineFlowEdge: PipelineFlowEdge,
+};
+
 export const Pipelines: React.FC = () => {
   const location = useLocation();
   const { currentPipeline, isHydrating, setPipeline } = usePipelineContext();
@@ -603,6 +824,9 @@ export const Pipelines: React.FC = () => {
   const [hasUnsavedGraphChanges, setHasUnsavedGraphChanges] = React.useState(false);
   const [isGraphSaveInFlight, setIsGraphSaveInFlight] = React.useState(false);
   const [graphRevision, setGraphRevision] = React.useState(0);
+  const reactFlowWrapperRef = React.useRef<HTMLDivElement | null>(null);
+  const [reactFlowInstance, setReactFlowInstance] =
+    React.useState<ReactFlowInstance | null>(null);
 
   const graphRevisionRef = React.useRef(0);
   const lastSavedGraphRef = React.useRef<{
@@ -1246,6 +1470,67 @@ export const Pipelines: React.FC = () => {
     [canvasEdges, markGraphAsDirty, syncCanvasNodesConnections]
   );
 
+  const onNewNodeDragStart = React.useCallback(
+    (event: React.DragEvent<HTMLButtonElement>) => {
+      event.dataTransfer.setData(NEW_NODE_DRAG_TYPE, 'pipelineStep');
+      event.dataTransfer.effectAllowed = 'move';
+    },
+    []
+  );
+
+  const onCanvasDragOver = React.useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+  }, []);
+
+  const onCanvasDrop = React.useCallback(
+    (event: React.DragEvent) => {
+      event.preventDefault();
+      const droppedType = event.dataTransfer.getData(NEW_NODE_DRAG_TYPE);
+      if (droppedType !== 'pipelineStep') {
+        return;
+      }
+      if (!pipelineId) {
+        toast.error('Сначала соберите или откройте пайплайн');
+        return;
+      }
+      if (!reactFlowInstance || !reactFlowWrapperRef.current) {
+        return;
+      }
+
+      const dropPosition = resolveDropPosition(
+        reactFlowInstance,
+        event,
+        reactFlowWrapperRef.current.getBoundingClientRect()
+      );
+
+      let createdStep: number | null = null;
+      setCanvasNodes((prevNodes) => {
+        const nextStep = getNextStepNumber(prevNodes);
+        createdStep = nextStep;
+        return [
+          ...prevNodes,
+          {
+            id: String(nextStep),
+            type: 'pipelineStep',
+            position: dropPosition,
+            data: {
+              node: createDraftPipelineNode(nextStep),
+              stepStatus: null,
+            },
+          },
+        ];
+      });
+
+      if (createdStep !== null) {
+        setExpandedStep(createdStep);
+      }
+      markGraphAsDirty();
+      toast.success('Новая нода добавлена');
+    },
+    [markGraphAsDirty, pipelineId, reactFlowInstance]
+  );
+
   return (
     <>
       <Dialog open={edgeDialog.open} onOpenChange={(open) => !open && closeEdgeDialog()}>
@@ -1328,6 +1613,14 @@ export const Pipelines: React.FC = () => {
                 </p>
               </div>
               <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  className="gap-2 border-emerald-500/30 text-emerald-700 hover:bg-emerald-500/10"
+                  draggable
+                  onDragStart={onNewNodeDragStart}
+                >
+                  <Plus className="h-4 w-4" /> Новая нода (drag)
+                </Button>
                 <Badge
                   variant="outline"
                   className={cn(
@@ -1355,14 +1648,21 @@ export const Pipelines: React.FC = () => {
                   Восстановление данных сессии...
                 </p>
               </div>
-            ) : canvasNodes.length > 0 ? (
-              <Card className="h-[560px] overflow-hidden border-primary/20 bg-card/60">
+            ) : currentPipeline ? (
+              <Card
+                ref={reactFlowWrapperRef}
+                className="relative h-[560px] overflow-hidden border-primary/20 bg-card/60"
+              >
                 <ReactFlow
                   nodes={canvasNodes}
                   edges={canvasEdges}
                   nodeTypes={nodeTypes}
+                  edgeTypes={edgeTypes}
                   onNodesChange={onNodesChange}
                   onConnect={onConnect}
+                  onInit={setReactFlowInstance}
+                  onDrop={onCanvasDrop}
+                  onDragOver={onCanvasDragOver}
                   onNodeClick={(_, node) => setExpandedStep(Number(node.id))}
                   onEdgeClick={(_, edge) => openEditEdgeDialog(edge)}
                   onEdgesDelete={onEdgesDelete}
@@ -1375,8 +1675,8 @@ export const Pipelines: React.FC = () => {
                   edgesFocusable
                   nodesDeletable={false}
                   defaultEdgeOptions={{
-                    type: 'smoothstep',
-                    markerEnd: { type: MarkerType.ArrowClosed },
+                    type: 'pipelineFlowEdge',
+                    markerEnd: { type: MarkerType.ArrowClosed, color: '#22c55e' },
                   }}
                   minZoom={0.3}
                   maxZoom={1.8}
@@ -1385,6 +1685,13 @@ export const Pipelines: React.FC = () => {
                   <Background gap={24} size={1} />
                   <Controls showInteractive={false} />
                 </ReactFlow>
+                {canvasNodes.length === 0 ? (
+                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                    <p className="rounded-full border border-emerald-500/25 bg-background/85 px-4 py-2 text-xs font-medium text-emerald-700">
+                      Перетащите "Новая нода" на канвас
+                    </p>
+                  </div>
+                ) : null}
               </Card>
             ) : (
               <Card className="mx-auto flex max-w-2xl items-center gap-4 border-dashed border-primary/20 bg-card p-8">
@@ -1448,16 +1755,16 @@ export const Pipelines: React.FC = () => {
                     {hasRequestBody(selectedStepRun.method) && (
                       <div>
                         <p className="text-xs font-semibold text-foreground">Принял</p>
-                        <pre className="mt-1 max-h-40 overflow-auto rounded-lg border border-border/50 bg-muted/50 p-3 text-[10px] font-mono">
-                          {formatPayload(selectedStepRun.accepted_payload)}
-                        </pre>
+                        <div className="mt-1">
+                          <PayloadViewer payload={selectedStepRun.accepted_payload} />
+                        </div>
                       </div>
                     )}
                     <div>
                       <p className="text-xs font-semibold text-foreground">Вернул</p>
-                      <pre className="mt-1 max-h-40 overflow-auto rounded-lg border border-border/50 bg-muted/50 p-3 text-[10px] font-mono">
-                        {formatPayload(selectedStepRun.output_payload)}
-                      </pre>
+                      <div className="mt-1">
+                        <PayloadViewer payload={selectedStepRun.output_payload} />
+                      </div>
                     </div>
                   </div>
                 )}
