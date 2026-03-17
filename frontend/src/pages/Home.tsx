@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { FileJson, Send, Sparkles, Wand2, Shield, Zap, Download } from 'lucide-react';
+import { FileJson, Send, Sparkles, Wand2, Shield, Zap, Download, Copy } from 'lucide-react';
 import { SwaggerImportModal } from '@/components/shared/SwaggerImportModal';
 import { ImportResultsModal } from '@/components/shared/ImportResultsModal';
 import { useNavigate } from 'react-router-dom';
@@ -16,6 +16,14 @@ import { generateUUID, cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const Home: React.FC = () => {
+  const COPY_PROMPT_TEXT = `нужно
+Получить список недавно активных пользователей
+Получить список популярных отелей
+Сгруппировать пользователей по интересам к отелям
+Назначить конкретные отели пользователям
+Разослать персонализированные предложения пользователям
+Оценить качество лидов`;
+
   const { addActions, addCapabilities, capabilities } = useActionsContext();
   const isChatDisabled = capabilities.length === 0;
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
@@ -39,6 +47,15 @@ const Home: React.FC = () => {
       }
     });
     setChatMessage('');
+  };
+
+  const handleCopyPrompt = async () => {
+    setChatMessage(COPY_PROMPT_TEXT);
+    try {
+      await navigator.clipboard.writeText(COPY_PROMPT_TEXT);
+    } catch (_error) {
+      // Clipboard may be unavailable in non-secure contexts; input is still filled.
+    }
   };
 
   return (
@@ -169,6 +186,14 @@ const Home: React.FC = () => {
                 <Download className="h-4 w-4 text-primary" />
                 Download base swagger
               </a>
+            </Button>
+            <Button
+              variant="outline"
+              className="gap-2 border-border bg-card/50 backdrop-blur-sm hover:bg-accent transition-all animate-in fade-in zoom-in duration-500 delay-400"
+              onClick={handleCopyPrompt}
+            >
+              <Copy className="h-4 w-4 text-primary" />
+              Copy prompt
             </Button>
           </div>
         </div>
