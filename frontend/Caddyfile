@@ -1,24 +1,18 @@
-team-29-main2-8f6819.pages.prodcontest.ru {
-  encode gzip
+:80 {
+  @grafana path /grafana*
+  reverse_proxy @grafana 84.201.161.175:8052
 
-  handle_path /grafana* {
-    reverse_proxy 84.252.140.215:8052
-  }
+  @actions_no_slash path /api/v1/actions
+  redir @actions_no_slash /api/v1/actions/ 308
+  @capabilities_no_slash path /api/v1/capabilities
+  redir @capabilities_no_slash /api/v1/capabilities/ 308
+  @executions_no_slash path /api/v1/executions
+  redir @executions_no_slash /api/v1/executions/ 308
+  @users_no_slash path /api/users
+  redir @users_no_slash /api/users/ 308
 
   @api path /api/* /docs* /redoc* /openapi.json*
   reverse_proxy @api api:8000
-
-  @actions_no_slash path /api/v1/actions
-  rewrite @actions_no_slash /api/v1/actions/
-
-  @capabilities_no_slash path /api/v1/capabilities
-  rewrite @capabilities_no_slash /api/v1/capabilities/
-
-  @executions_no_slash path /api/v1/executions
-  rewrite @executions_no_slash /api/v1/executions/
-
-  @users_no_slash path /api/users
-  rewrite @users_no_slash /api/users/
 
   reverse_proxy web:80
 }
