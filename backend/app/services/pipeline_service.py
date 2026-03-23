@@ -153,6 +153,20 @@ class PipelineService:
             raw_graph=raw_graph,
             selected_capabilities=selected_capabilities,
         )
+
+        if len(selected_capabilities) >= 4 and len(normalized_nodes) < 3:
+            fallback_raw_graph = self._build_minimal_raw_graph(selected_capabilities)
+            if fallback_raw_graph is not None:
+                fallback_nodes, fallback_edges, fallback_ready, fallback_missing = self._prepare_graph(
+                    raw_graph=fallback_raw_graph,
+                    selected_capabilities=selected_capabilities,
+                )
+                if fallback_nodes:
+                    normalized_nodes = fallback_nodes
+                    normalized_edges = fallback_edges
+                    is_ready = fallback_ready
+                    missing = fallback_missing
+
         chat_reply = self._build_chat_reply_ru(normalized_nodes, normalized_edges)
         has_strict_capability_issues = self._has_strict_capability_issues(missing)
 
@@ -261,6 +275,9 @@ class PipelineService:
             normalized_edges,
             selected_capabilities,
         )
+        if len(normalized_nodes) >= 4 and len(reviewed_nodes) < 3:
+            reviewed_nodes = normalized_nodes
+            reviewed_edges = normalized_edges
         reviewed_edges = self._repair_edges_with_data_flow(reviewed_nodes, reviewed_edges)
         reviewed_edges = self._prune_edges_for_terminal_goal(reviewed_nodes, reviewed_edges)
         reviewed_edges = self._prune_edges_by_required_inputs(reviewed_nodes, reviewed_edges)
@@ -411,9 +428,16 @@ class PipelineService:
 
         nodes: list[dict[str, Any]] = []
         edges: list[dict[str, Any]] = []
+        required_by_step: dict[int, list[str]] = {}
+        outputs_by_step: dict[int, list[str]] = {}
+
         for index, cap in enumerate(ordered_caps, start=1):
             required_inputs = self._extract_required_inputs(
                 getattr(cap, "input_schema", None)
+            )
+            required_by_step[index] = required_inputs
+            outputs_by_step[index] = self._extract_schema_field_names(
+                getattr(cap, "output_schema", None)
             )
             nodes.append(
                 {
@@ -421,27 +445,172 @@ class PipelineService:
                     "name": str(getattr(cap, "name", f"Step {index}") or f"Step {index}"),
                     "description": getattr(cap, "description", None),
                     "capability_id": str(getattr(cap, "id")),
-                    "input_connected_from": [index - 1] if index > 1 else [],
-                    "output_connected_to": [index + 1] if index < len(ordered_caps) else [],
-                    "input_data_type_from_previous": (
-                        [{"from_step": index - 1, "type": self._infer_fallback_edge_type(ordered_caps[index - 2], cap)}]
-                        if index > 1
-                        else []
-                    ),
-                    "external_inputs": required_inputs if index == 1 else [],
+                    "input_connected_from": [],
+                    "output_connected_to": [],
+                    "input_data_type_from_previous": [],
+                    "external_inputs": [],
                 }
             )
 
-        for index in range(1, len(ordered_caps)):
-            from_cap = ordered_caps[index - 1]
-            to_cap = ordered_caps[index]
-            edges.append(
+        for to_step in range(1, len(ordered_caps) + 1):
+            if to_step == 1:
+                continue
+            to_cap = ordered_caps[to_step - 1]
+            to_signature = self._fallback_capability_signature(to_cap)
+            to_required = required_by_step.get(to_step, [])
+            to_required_keys = {
+                self._normalize_lookup_token(item): item
+                for item in to_required
+                if isinstance(item, str) and item.strip()
+            }
+
+            selected_parents: list[tuple[int, str]] = []
+            for from_step in range(1, to_step):
+                from_fields = outputs_by_step.get(from_step, [])
+                matched_type = None
+                for field in from_fields:
+                    field_key = self._normalize_lookup_token(field)
+                    if field_key and field_key in to_required_keys:
+                        matched_type = to_required_keys[field_key]
+                        break
+                if matched_type is not None:
+                    selected_parents.append((from_step, matched_type))
+
+            # Domain heuristic: segmentation typically merges users + hotels branches.
+            if "segment" in to_signature and len(selected_parents) < 2:
+                user_parent = None
+                hotel_parent = None
+                for from_step in range(1, to_step):
+                    from_signature = self._fallback_capability_signature(
+                        ordered_caps[from_step - 1]
+                    )
+                    if user_parent is None and (
+                        "user" in from_signature or "client" in from_signature
+                    ):
+                        user_parent = from_step
+                    if hotel_parent is None and "hotel" in from_signature:
+                        hotel_parent = from_step
+
+                seen_parent_steps = {item[0] for item in selected_parents}
+                if user_parent is not None and user_parent not in seen_parent_steps:
+                    selected_parents.append(
+                        (
+                            user_parent,
+                            self._infer_fallback_edge_type(
+                                ordered_caps[user_parent - 1],
+                                to_cap,
+                            ),
+                        )
+                    )
+                    seen_parent_steps.add(user_parent)
+                if hotel_parent is not None and hotel_parent not in seen_parent_steps:
+                    selected_parents.append(
+                        (
+                            hotel_parent,
+                            self._infer_fallback_edge_type(
+                                ordered_caps[hotel_parent - 1],
+                                to_cap,
+                            ),
+                        )
+                    )
+
+            if not selected_parents:
+                segment_parent = None
+                assign_parent = None
+                send_parent = None
+                for from_step in range(1, to_step):
+                    from_signature = self._fallback_capability_signature(
+                        ordered_caps[from_step - 1]
+                    )
+                    if segment_parent is None and "segment" in from_signature:
+                        segment_parent = from_step
+                    if assign_parent is None and "assign" in from_signature:
+                        assign_parent = from_step
+                    if send_parent is None and (
+                        "send" in from_signature or "email" in from_signature
+                    ):
+                        send_parent = from_step
+
+                if "assign" in to_signature and segment_parent is not None:
+                    selected_parents.append(
+                        (
+                            segment_parent,
+                            self._infer_fallback_edge_type(
+                                ordered_caps[segment_parent - 1],
+                                to_cap,
+                            ),
+                        )
+                    )
+                elif (
+                    ("send" in to_signature or "email" in to_signature)
+                    and assign_parent is not None
+                ):
+                    selected_parents.append(
+                        (
+                            assign_parent,
+                            self._infer_fallback_edge_type(
+                                ordered_caps[assign_parent - 1],
+                                to_cap,
+                            ),
+                        )
+                    )
+                elif ("qualify" in to_signature or "lead" in to_signature):
+                    preferred_parent = send_parent or assign_parent or segment_parent
+                    if preferred_parent is not None:
+                        selected_parents.append(
+                            (
+                                preferred_parent,
+                                self._infer_fallback_edge_type(
+                                    ordered_caps[preferred_parent - 1],
+                                    to_cap,
+                                ),
+                            )
+                        )
+
+            if not selected_parents and to_required:
+                # Keep DAG connected when schemas are too weak to match fields exactly.
+                fallback_from = to_step - 1
+                selected_parents.append(
+                    (
+                        fallback_from,
+                        self._infer_fallback_edge_type(ordered_caps[fallback_from - 1], to_cap),
+                    )
+                )
+
+            for from_step, edge_type in selected_parents:
+                edges.append(
+                    {
+                        "from_step": from_step,
+                        "to_step": to_step,
+                        "type": edge_type,
+                    }
+                )
+
+        self._sync_node_connections(nodes, edges)
+
+        for node in nodes:
+            step = node.get("step")
+            if not isinstance(step, int):
+                continue
+            incoming_types = {
+                str(edge.get("type"))
+                for edge in edges
+                if edge.get("to_step") == step and isinstance(edge.get("type"), str)
+            }
+            required_inputs = required_by_step.get(step, [])
+            node["input_data_type_from_previous"] = [
                 {
-                    "from_step": index,
-                    "to_step": index + 1,
-                    "type": self._infer_fallback_edge_type(from_cap, to_cap),
+                    "from_step": edge["from_step"],
+                    "type": edge["type"],
                 }
-            )
+                for edge in edges
+                if edge.get("to_step") == step
+            ]
+            node["external_inputs"] = [
+                required_input
+                for required_input in required_inputs
+                if not self._is_input_satisfied_by_values(required_input, incoming_types)
+            ]
 
         return {
             "nodes": nodes,
@@ -474,6 +643,14 @@ class PipelineService:
     def _infer_fallback_edge_type(self, from_capability: Any, to_capability: Any) -> str:
         to_required = self._extract_required_inputs(getattr(to_capability, "input_schema", None))
         from_output_fields = self._extract_schema_field_names(getattr(from_capability, "output_schema", None))
+        from_signature = self._fallback_capability_signature(from_capability)
+
+        semantic_required = self._select_required_input_by_signature(
+            to_required,
+            from_signature,
+        )
+        if semantic_required is not None:
+            return semantic_required
 
         normalized_from = {self._normalize_lookup_token(item): item for item in from_output_fields}
         for required in to_required:
@@ -486,6 +663,58 @@ class PipelineService:
         if from_output_fields:
             return from_output_fields[0]
         return "data"
+
+    def _fallback_capability_signature(self, capability: Any) -> str:
+        context = self._extract_capability_action_context(capability)
+        name = str(getattr(capability, "name", "") or "").lower()
+        operation_id = str(context.get("operation_id", "") or "").lower()
+        path = str(context.get("path", "") or "").lower()
+        method = str(context.get("method", "") or "").lower()
+        return " ".join(
+            part for part in (name, operation_id, method, path) if part
+        )
+
+    def _select_required_input_by_signature(
+        self,
+        required_inputs: list[str],
+        from_signature: str,
+    ) -> str | None:
+        if not required_inputs:
+            return None
+
+        lower_required = [str(item).strip().lower() for item in required_inputs]
+
+        if "hotel" in from_signature:
+            for idx, required in enumerate(lower_required):
+                if "hotel" in required:
+                    return required_inputs[idx]
+
+        if "user" in from_signature or "client" in from_signature:
+            for idx, required in enumerate(lower_required):
+                if "user" in required or "client" in required:
+                    return required_inputs[idx]
+
+        if "segment" in from_signature:
+            for idx, required in enumerate(lower_required):
+                if "segment" in required:
+                    return required_inputs[idx]
+
+        if "assign" in from_signature:
+            for idx, required in enumerate(lower_required):
+                if "assign" in required:
+                    return required_inputs[idx]
+
+        if "offer" in from_signature or "email" in from_signature:
+            for idx, required in enumerate(lower_required):
+                if "offer" in required or "email" in required:
+                    return required_inputs[idx]
+
+        if "lead" in from_signature:
+            for idx, required in enumerate(lower_required):
+                if "lead" in required:
+                    return required_inputs[idx]
+
+        return None
 
     def _extract_schema_field_names(self, schema: Any) -> list[str]:
         if not isinstance(schema, dict):
@@ -1675,7 +1904,8 @@ class PipelineService:
             required_inputs = required_by_step.get(to_step, set())
             explicit_types = explicit_by_step.get(to_step, set())
             if not required_inputs and not explicit_types:
-                filtered.extend(target_edges)
+                # Source-like step with no required data should not depend on previous outputs.
+                # This preserves parallel branches such as users/hotels collectors.
                 continue
 
             matched_edges = [
@@ -1719,6 +1949,11 @@ class PipelineService:
         else:
             # No usable data-flow edges: keep all steps so later repair/validation
             # can recover connections instead of collapsing to a single terminal node.
+            keep_steps = set(steps)
+
+        if len(steps) >= 4 and len(keep_steps) < 3:
+            # Guardrail: do not collapse complex workflows to tiny subgraphs.
+            # Keep full node set and let validation surface missing links instead.
             keep_steps = set(steps)
 
         pruned_nodes = [
