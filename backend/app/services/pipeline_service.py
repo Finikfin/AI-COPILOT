@@ -532,40 +532,38 @@ class PipelineService:
                         send_parent = from_step
 
                 if "assign" in to_signature and segment_parent is not None:
-                    selected_parents.append(
-                        (
-                            segment_parent,
-                            self._infer_fallback_edge_type(
-                                ordered_caps[segment_parent - 1],
-                                to_cap,
-                            ),
-                        )
+                    edge_type = self._semantic_crm_edge_type(
+                        src_stage="segment",
+                        dst_stage="assign",
+                        required_inputs=to_required,
                     )
+                    selected_parents.append((segment_parent, edge_type))
                 elif (
                     ("send" in to_signature or "email" in to_signature)
                     and assign_parent is not None
                 ):
-                    selected_parents.append(
-                        (
-                            assign_parent,
-                            self._infer_fallback_edge_type(
-                                ordered_caps[assign_parent - 1],
-                                to_cap,
-                            ),
-                        )
+                    edge_type = self._semantic_crm_edge_type(
+                        src_stage="assign",
+                        dst_stage="send",
+                        required_inputs=to_required,
                     )
+                    selected_parents.append((assign_parent, edge_type))
                 elif ("qualify" in to_signature or "lead" in to_signature):
                     preferred_parent = send_parent or assign_parent or segment_parent
                     if preferred_parent is not None:
-                        selected_parents.append(
-                            (
-                                preferred_parent,
-                                self._infer_fallback_edge_type(
-                                    ordered_caps[preferred_parent - 1],
-                                    to_cap,
-                                ),
-                            )
+                        from_stage = None
+                        if preferred_parent == send_parent:
+                            from_stage = "send"
+                        elif preferred_parent == assign_parent:
+                            from_stage = "assign"
+                        else:
+                            from_stage = "segment"
+                        edge_type = self._semantic_crm_edge_type(
+                            src_stage=from_stage,
+                            dst_stage="qualify",
+                            required_inputs=to_required,
                         )
+                        selected_parents.append((preferred_parent, edge_type))
 
             if not selected_parents and to_required:
                 # Keep DAG connected when schemas are too weak to match fields exactly.
@@ -715,6 +713,35 @@ class PipelineService:
                     return required_inputs[idx]
 
         return None
+
+    def _semantic_crm_edge_type(
+        self,
+        src_stage: str,
+        dst_stage: str,
+        required_inputs: list[str],
+    ) -> str:
+        domain_types = {
+            ("segment", "assign"): "segmentedUsers",
+            ("assign", "send"): "assignments",
+            ("send", "qualify"): "sentOffers",
+            ("assign", "qualify"): "assignments",
+            ("segment", "qualify"): "segmentedUsers",
+        }
+        if (src_stage, dst_stage) in domain_types:
+            return domain_types[(src_stage, dst_stage)]
+
+        if not required_inputs:
+            return "data"
+
+        lower_required = [str(item).strip().lower() for item in required_inputs]
+        if "assignment" in lower_required[0]:
+            return "assignments"
+        if "offer" in lower_required[0]:
+            return "sentOffers"
+        if "segment" in lower_required[0]:
+            return "segmentedUsers"
+
+        return lower_required[0] if lower_required else "data"
 
     def _extract_schema_field_names(self, schema: Any) -> list[str]:
         if not isinstance(schema, dict):
