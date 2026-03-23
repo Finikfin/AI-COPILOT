@@ -66,8 +66,12 @@ async def generate_pipeline(
             previous_pipeline_id=dialog.last_pipeline_id,
         )
     except Exception as exc:
-        if "ollama" in str(exc).lower():
-            message_ru = "Не удалось обратиться к локальной модели Ollama. Проверьте OLLAMA_HOST/OLLAMA_MODEL и повторите запрос."
+        if any(token in str(exc).lower() for token in ("llm provider", "openai", "yandex", "model")):
+            message_ru = (
+                "Не удалось обратиться к LLM-провайдеру. "
+                "Проверьте настройки Yandex API (YANDEX_API_KEY/YANDEX_FOLDER_ID) "
+                "или OpenAI API (LLM_BASE_URL/LLM_MODEL/LLM_API_KEY) и повторите запрос."
+            )
             result = {
                 "status": "cannot_build",
                 "message_ru": message_ru,
@@ -75,7 +79,7 @@ async def generate_pipeline(
                 "pipeline_id": None,
                 "nodes": [],
                 "edges": [],
-                "missing_requirements": ["ollama_unavailable"],
+                "missing_requirements": ["llm_unavailable"],
                 "context_summary": None,
             }
         else:

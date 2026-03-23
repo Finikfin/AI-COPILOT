@@ -9,7 +9,7 @@ try:
 except ModuleNotFoundError:
     aioredis = None
 
-from app.utils.ollama_client import chat_json, summarize_dialog_text
+from app.utils.llm_client import chat_json, summarize_dialog_text
 
 
 class DialogMemoryService:

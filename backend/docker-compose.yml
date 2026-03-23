@@ -13,6 +13,17 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://user:password@db:5432/dbname
       - REDIS_URL=redis://redis:6379/0
+      - LLM_PROVIDER=${LLM_PROVIDER:-auto}
+      - LLM_BASE_URL=${LLM_BASE_URL:-https://api.openai.com/v1}
+      - LLM_MODEL=${LLM_MODEL:-gpt-4.1}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_TIMEOUT_SECONDS=${LLM_TIMEOUT_SECONDS:-60}
+      - YANDEX_API_KEY=${YANDEX_API_KEY:-}
+      - YANDEX_IAM_TOKEN=${YANDEX_IAM_TOKEN:-}
+      - YANDEX_FOLDER_ID=${YANDEX_FOLDER_ID:-}
+      - YANDEX_MODEL_URI=${YANDEX_MODEL_URI:-}
+      - YANDEX_MODEL_NAME=${YANDEX_MODEL_NAME:-yandexgpt-lite/latest}
+      - YANDEX_API_URL=${YANDEX_API_URL:-https://llm.api.cloud.yandex.net/foundationModels/v1/completion}
     depends_on:
       db:
         condition: service_healthy

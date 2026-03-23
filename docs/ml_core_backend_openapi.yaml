@@ -145,15 +145,15 @@ paths:
                     missing_requirements: ["template_id"]
                     context_summary: null
                 cannot_build:
-                  summary: Модель недоступна
+                  summary: LLM провайдер недоступен
                   value:
                     status: "cannot_build"
-                    message_ru: "Не удалось обратиться к локальной модели Ollama. Проверьте OLLAMA_HOST/OLLAMA_MODEL и повторите запрос."
-                    chat_reply_ru: "Не удалось обратиться к локальной модели Ollama. Проверьте OLLAMA_HOST/OLLAMA_MODEL и повторите запрос."
+                    message_ru: "Не удалось обратиться к LLM-провайдеру. Проверьте конфигурацию Yandex API или OpenAI API и повторите запрос."
+                    chat_reply_ru: "Не удалось обратиться к LLM-провайдеру. Проверьте конфигурацию Yandex API или OpenAI API и повторите запрос."
                     pipeline_id: null
                     nodes: []
                     edges: []
-                    missing_requirements: ["ollama_unavailable"]
+                    missing_requirements: ["llm_unavailable"]
                     context_summary: null
         "401":
           $ref: "#/components/responses/UnauthorizedError"

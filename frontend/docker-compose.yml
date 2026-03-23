@@ -19,6 +19,16 @@ services:
       - caddy_config:/config
     networks: [shop-network]
 
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    restart: always
+    command: tunnel --url http://caddy:80 run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    networks: [shop-network]
+    depends_on:
+      - caddy
+
 networks:
   shop-network:
     external: true

@@ -11,7 +11,7 @@ from app.models import Pipeline, PipelineStatus
 from app.services.capability_service import CapabilityService
 from app.services.dialog_memory import DialogMemoryService
 from app.services.semantic_selection import SelectedCapability, SemanticSelectionService
-from app.utils.ollama_client import chat_json, reset_model_session
+from app.utils.llm_client import chat_json, reset_model_session
 
 
 class PipelineServiceError(Exception):
@@ -435,7 +435,7 @@ class PipelineService:
         reset_model_session()
         payload = chat_json(system_prompt=system_prompt, user_prompt=prompt)
         if not isinstance(payload, dict):
-            raise PipelineServiceError("Failed to call Ollama")
+            raise PipelineServiceError("Failed to call LLM provider")
         return payload
 
     def _build_generation_prompt(

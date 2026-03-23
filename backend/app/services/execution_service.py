@@ -962,6 +962,14 @@ class ExecutionService:
                 else:
                     body = unresolved
 
+        # Normalize known payload shapes before required-field checks.
+        if body_type == "object" and isinstance(body, dict):
+            self._normalize_known_payload_shapes(
+                body=body,
+                resolved_inputs=resolved_inputs,
+                body_properties=body_properties,
+            )
+
         missing_required: list[str] = []
         for field_name in params_required:
             if field_name in path_params or field_name in query_params or field_name in headers or field_name in cookies:
@@ -1014,6 +1022,67 @@ class ExecutionService:
                 "json_body": body,
             },
         }
+
+    def _normalize_known_payload_shapes(
+        self,
+        *,
+        body: dict[str, Any],
+        resolved_inputs: dict[str, Any],
+        body_properties: dict[str, Any],
+    ) -> None:
+        """Apply lightweight, schema-aware payload fixes for common chain mismatches."""
+        assignments_schema = body_properties.get("assignments")
+        if not isinstance(assignments_schema, dict):
+            return
+
+        items_schema = assignments_schema.get("items")
+        if not isinstance(items_schema, dict):
+            return
+
+        item_props = items_schema.get("properties")
+        if not isinstance(item_props, dict):
+            return
+
+        expects_assignment_shape = "user_id" in item_props and "hotel_id" in item_props
+        if not expects_assignment_shape:
+            return
+
+        assignments = body.get("assignments")
+        if isinstance(assignments, list) and assignments:
+            first_item = assignments[0]
+            if isinstance(first_item, dict) and "user_id" in first_item and "hotel_id" in first_item:
+                return
+
+        normalized = self._build_assignments_from_segments(body, resolved_inputs)
+        if normalized:
+            body["assignments"] = normalized
+            # When assignments are reconstructed, keep request body concise.
+            body.pop("users", None)
+
+    def _build_assignments_from_segments(
+        self,
+        body: dict[str, Any],
+        resolved_inputs: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        segments = body.get("segments")
+        if not isinstance(segments, list):
+            segments = resolved_inputs.get("segments")
+        if not isinstance(segments, list):
+            return []
+
+        assignments: list[dict[str, Any]] = []
+        for segment in segments:
+            if not isinstance(segment, dict):
+                continue
+            hotel_id = segment.get("hotel_id")
+            user_ids = segment.get("user_ids")
+            if not isinstance(hotel_id, str) or not isinstance(user_ids, list):
+                continue
+            for user_id in user_ids:
+                if isinstance(user_id, str) and user_id.strip():
+                    assignments.append({"user_id": user_id, "hotel_id": hotel_id})
+
+        return assignments
 
     def _resolve_action_base_url(self, action: Action) -> str | None:
         fallback_base_url = os.getenv("EXECUTION_DEFAULT_BASE_URL")
