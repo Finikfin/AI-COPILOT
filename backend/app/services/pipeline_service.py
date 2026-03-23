@@ -388,6 +388,7 @@ class PipelineService:
         self,
         selected_capabilities: list[SelectedCapability],
     ) -> dict[str, Any] | None:
+        executable_caps: list[Any] = []
         for item in selected_capabilities:
             cap = item.capability
             cap_id = getattr(cap, "id", None)
@@ -401,25 +402,102 @@ class PipelineService:
                 getattr(cap, "recipe", None)
             ):
                 continue
+            executable_caps.append(cap)
+
+        if not executable_caps:
+            return None
+
+        ordered_caps = sorted(executable_caps, key=self._fallback_capability_order_key)
+
+        nodes: list[dict[str, Any]] = []
+        edges: list[dict[str, Any]] = []
+        for index, cap in enumerate(ordered_caps, start=1):
             required_inputs = self._extract_required_inputs(
                 getattr(cap, "input_schema", None)
             )
-            return {
-                "nodes": [
-                    {
-                        "step": 1,
-                        "name": str(getattr(cap, "name", "Step 1") or "Step 1"),
-                        "description": getattr(cap, "description", None),
-                        "capability_id": str(cap_id),
-                        "input_connected_from": [],
-                        "output_connected_to": [],
-                        "input_data_type_from_previous": [],
-                        "external_inputs": required_inputs,
-                    }
-                ],
-                "edges": [],
-            }
-        return None
+            nodes.append(
+                {
+                    "step": index,
+                    "name": str(getattr(cap, "name", f"Step {index}") or f"Step {index}"),
+                    "description": getattr(cap, "description", None),
+                    "capability_id": str(getattr(cap, "id")),
+                    "input_connected_from": [index - 1] if index > 1 else [],
+                    "output_connected_to": [index + 1] if index < len(ordered_caps) else [],
+                    "input_data_type_from_previous": (
+                        [{"from_step": index - 1, "type": self._infer_fallback_edge_type(ordered_caps[index - 2], cap)}]
+                        if index > 1
+                        else []
+                    ),
+                    "external_inputs": required_inputs if index == 1 else [],
+                }
+            )
+
+        for index in range(1, len(ordered_caps)):
+            from_cap = ordered_caps[index - 1]
+            to_cap = ordered_caps[index]
+            edges.append(
+                {
+                    "from_step": index,
+                    "to_step": index + 1,
+                    "type": self._infer_fallback_edge_type(from_cap, to_cap),
+                }
+            )
+
+        return {
+            "nodes": nodes,
+            "edges": edges,
+        }
+
+    def _fallback_capability_order_key(self, capability: Any) -> tuple[int, str]:
+        context = self._extract_capability_action_context(capability)
+        name = str(getattr(capability, "name", "") or "").lower()
+        operation_id = str(context.get("operation_id", "") or "").lower()
+        path = str(context.get("path", "") or "").lower()
+        method = str(context.get("method", "") or "").lower()
+        signature = " ".join(part for part in (name, operation_id, method, path) if part)
+
+        # Prefer canonical travel/crm sequence when present.
+        if "recent" in signature and ("users" in signature or "/users" in signature):
+            return (10, signature)
+        if "top" in signature and ("hotel" in signature or "/hotels" in signature):
+            return (20, signature)
+        if "segment" in signature:
+            return (30, signature)
+        if "assign" in signature:
+            return (40, signature)
+        if "send" in signature and ("offer" in signature or "email" in signature):
+            return (50, signature)
+        if "qualify" in signature or "lead" in signature:
+            return (60, signature)
+        return (100, signature)
+
+    def _infer_fallback_edge_type(self, from_capability: Any, to_capability: Any) -> str:
+        to_required = self._extract_required_inputs(getattr(to_capability, "input_schema", None))
+        from_output_fields = self._extract_schema_field_names(getattr(from_capability, "output_schema", None))
+
+        normalized_from = {self._normalize_lookup_token(item): item for item in from_output_fields}
+        for required in to_required:
+            key = self._normalize_lookup_token(required)
+            if key in normalized_from:
+                return required
+
+        if to_required:
+            return to_required[0]
+        if from_output_fields:
+            return from_output_fields[0]
+        return "data"
+
+    def _extract_schema_field_names(self, schema: Any) -> list[str]:
+        if not isinstance(schema, dict):
+            return []
+        properties = schema.get("properties")
+        if not isinstance(properties, dict):
+            return []
+        result: list[str] = []
+        for key in properties.keys():
+            if isinstance(key, str) and key.strip():
+                result.append(key.strip())
+        return result
 
     def generate_raw_graph(
         self,
@@ -1294,6 +1372,10 @@ class PipelineService:
 
         keep_steps = set(self._normalize_int_list(payload.get("keep_steps")))
         keep_steps = keep_steps & known_steps if keep_steps else set(known_steps)
+        if len(nodes) >= 3 and len(keep_steps) < 2:
+            # Guardrail: avoid collapsing multi-step workflows to a single step
+            # when reviewer output is overly aggressive.
+            keep_steps = set(known_steps)
 
         reviewed_edges = self._normalize_review_edges(payload.get("edges"), keep_steps)
         if not reviewed_edges:
@@ -1635,9 +1717,9 @@ class PipelineService:
         if connected_steps:
             keep_steps = connected_steps
         else:
-            # No usable data-flow edges: keep only one primary step
-            # to avoid returning multiple hanging nodes.
-            keep_steps = {max(steps)}
+            # No usable data-flow edges: keep all steps so later repair/validation
+            # can recover connections instead of collapsing to a single terminal node.
+            keep_steps = set(steps)
 
         pruned_nodes = [
             node
