@@ -52,6 +52,7 @@ async def run_pipeline(
             pipeline_id=pipeline_id,
             inputs=payload.inputs,
             initiated_by=current_user.id,
+            dialog_id=payload.dialog_id,
         )
     except ExecutionServiceError as exc:
         message = str(exc)

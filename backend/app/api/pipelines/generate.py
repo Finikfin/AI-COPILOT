@@ -8,6 +8,7 @@ from app.models import User
 from app.schemas.pipeline_chat_sch import PipelineGenerateRequest, PipelineGenerateResponse
 from app.services.pipeline_dialog_service import DialogAccessError, PipelineDialogService
 from app.services.pipeline_service import PipelineService
+from app.services.dialog_memory import DialogMemoryService
 from app.utils.business_logger import log_business_event
 from app.utils.token_manager import get_current_user
 
@@ -34,6 +35,8 @@ async def generate_pipeline(
 
     service = PipelineService(session)
     dialog_service = PipelineDialogService(session)
+    dialog_memory = DialogMemoryService()
+    
     try:
         await dialog_service.append_user_message(
             dialog_id=payload.dialog_id,
@@ -58,12 +61,21 @@ async def generate_pipeline(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail) from exc
 
     try:
+        # Only reuse previous pipeline if dialog has multiple messages (iterative refinement)
+        # For fresh/single-message dialogs, always generate new pipeline
+        previous_pipeline_id = None
+        if dialog.messages and len(dialog.messages) > 1:
+            # -1 because we just added a new message
+            previous_pipeline_id = dialog.last_pipeline_id
+        else:
+            # First message in dialog - clean any stale memory from Redis
+            await dialog_memory.reset(str(payload.dialog_id))
         result = await service.generate(
             dialog_id=payload.dialog_id,
             message=payload.message,
             user_id=current_user.id,
             capability_ids=payload.capability_ids,
-            previous_pipeline_id=dialog.last_pipeline_id,
+            previous_pipeline_id=previous_pipeline_id,
         )
     except Exception as exc:
         if any(token in str(exc).lower() for token in ("llm provider", "openai", "yandex", "model")):

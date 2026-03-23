@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class RunPipelineRequest(BaseModel):
     inputs: dict[str, Any] = Field(default_factory=dict)
+    dialog_id: UUID | None = None
 
 
 class RunPipelineResponse(BaseModel):

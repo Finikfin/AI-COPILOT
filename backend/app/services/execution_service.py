@@ -106,6 +106,7 @@ class ExecutionService:
         pipeline_id: uuid.UUID,
         inputs: dict[str, Any] | None = None,
         initiated_by: uuid.UUID | None = None,
+        dialog_id: uuid.UUID | None = None,
     ) -> ExecutionRun:
         pipeline = await self.session.get(Pipeline, pipeline_id)
         if pipeline is None:
@@ -115,6 +116,7 @@ class ExecutionService:
 
         run = ExecutionRun(
             pipeline_id=pipeline_id,
+            dialog_id=dialog_id,
             initiated_by=initiated_by,
             status=ExecutionRunStatus.QUEUED,
             inputs=inputs or {},
@@ -1149,7 +1151,7 @@ class ExecutionService:
         if not candidate:
             return fallback
         if self._is_absolute_url(candidate):
-            return candidate
+            return self._rewrite_demo_base_url_for_runtime(candidate)
         if fallback:
             return self._join_url(fallback, candidate)
         return None
@@ -1165,6 +1167,27 @@ class ExecutionService:
     def _is_absolute_url(value: str) -> bool:
         parsed = urlparse(str(value or ""))
         return bool(parsed.scheme and parsed.netloc)
+
+    def _rewrite_demo_base_url_for_runtime(self, candidate: str) -> str:
+        """Rewrite demo-backend URLs unreachable from docker runtime to internal docker URL."""
+        parsed = urlparse(candidate)
+        host = (parsed.hostname or "").strip().lower()
+        port = parsed.port
+        
+        rewrite_hosts = {
+            "84.201.161.175",
+            "localhost",
+            "127.0.0.1",
+            "host.docker.internal",
+        }
+        
+        if port == 8010 and host in rewrite_hosts:
+            override = os.getenv("EXECUTION_DEMO_INTERNAL_BASE_URL", "http://demo-api:8010")
+            normalized_override = self._normalize_base_url(override)
+            if normalized_override and self._is_absolute_url(normalized_override):
+                return normalized_override
+        
+        return candidate
 
     async def _call_action(
         self,

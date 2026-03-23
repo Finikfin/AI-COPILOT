@@ -79,8 +79,10 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
   }, [messages]);
 
   useEffect(() => {
+    // Clear pipeline when switching to a new dialog to prevent state contamination
+    setPipeline(null);
     initialMessageProcessed.current = false;
-  }, [initialDialogId, initialMessage]);
+  }, [initialDialogId, initialMessage, setPipeline]);
 
   useEffect(() => {
     let cancelled = false;

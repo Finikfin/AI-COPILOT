@@ -1160,7 +1160,9 @@ export const Pipelines: React.FC = () => {
       setIsRunStarting(true);
       setExecution(null);
       notifiedTerminalStatusRef.current = null;
-      const run = await runPipeline(pipelineId);
+      const run = await runPipeline(pipelineId, {
+        dialog_id: dialogId,
+      });
       setActiveRunId(run.run_id);
       localStorage.setItem(`pipeline_active_run_${pipelineId}`, run.run_id);
       toast.success('Запуск пайплайна начат');
@@ -1170,7 +1172,7 @@ export const Pipelines: React.FC = () => {
     } finally {
       setIsRunStarting(false);
     }
-  }, [isGraphSavePending, pipelineId, startPollingExecution]);
+  }, [isGraphSavePending, pipelineId, dialogId, startPollingExecution]);
 
   const handleDownloadResult = React.useCallback(() => {
     if (finalOutput === undefined) {

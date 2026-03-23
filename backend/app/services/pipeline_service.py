@@ -54,6 +54,21 @@ class PipelineService:
             str(dialog_id)
         )
 
+        if self._is_low_quality_message(message):
+            return {
+                "status": "needs_input",
+                "message_ru": "Запрос слишком общий или случайный. Нужна цель сценария.",
+                "chat_reply_ru": (
+                    "Похоже, в запросе не хватает цели. "
+                    "Опишите, какой результат нужен (например: получить активных пользователей, "
+                    "сегментировать их и назначить отели)."
+                ),
+                "nodes": [],
+                "edges": [],
+                "missing_requirements": ["query:low_quality"],
+                "context_summary": dialog_summary,
+            }
+
         if capability_ids:
             try:
                 capabilities = await self.capability_service.get_capabilities(
@@ -89,13 +104,21 @@ class PipelineService:
                 self.session,
                 selection_query,
                 owner_user_id=user_id,
-                limit=10,
+                limit=5,
             )
+
+        selected_capabilities = self._reorder_selected_capabilities_by_plan(
+            message=message,
+            selected_capabilities=selected_capabilities,
+        )
 
         previous_pipeline: Pipeline | None = None
         previous_nodes: list[dict[str, Any]] = []
         previous_edges: list[dict[str, Any]] = []
-        if previous_pipeline_id is not None:
+        if previous_pipeline_id is not None and self._should_reuse_previous_graph(
+            message=message,
+            dialog_messages=dialog_messages,
+        ):
             candidate = await self.session.get(Pipeline, previous_pipeline_id)
             if candidate is not None and (
                 user_id is None or candidate.created_by in (None, user_id)
@@ -125,6 +148,24 @@ class PipelineService:
                 "missing_requirements": ["selection:no_matches"],
                 "context_summary": dialog_summary,
             }
+        
+        # If confidence is too low or only 1 capability selected with low confidence, ask for clarification
+        if self._selection_is_low_confidence(selected_capabilities) and len(selected_capabilities) <= 2:
+            clarification = self._build_low_confidence_question_ru(
+                question_number=1,
+                message=message,
+                dialog_messages=dialog_messages,
+                selected_capabilities=selected_capabilities,
+            )
+            return {
+                "status": "needs_input",
+                "message_ru": "Сценарий не на 100% уверенный. Нужны уточнения.",
+                "chat_reply_ru": clarification,
+                "nodes": [],
+                "edges": [],
+                "missing_requirements": ["selection:low_confidence"],
+                "context_summary": dialog_summary,
+            }
 
         prompt = self._build_generation_prompt(
             user_query=message,
@@ -138,7 +179,12 @@ class PipelineService:
         try:
             raw_graph = self.generate_raw_graph(message, selected_capabilities, prompt)
         except Exception:
-            raw_graph = self._build_minimal_raw_graph(selected_capabilities)
+            # Use only top-3 selected capabilities for fallback, not all
+            top_capabilities = selected_capabilities[:3] if len(selected_capabilities) > 3 else selected_capabilities
+            raw_graph = self._build_minimal_raw_graph(
+                top_capabilities,
+                user_query=message,
+            )
             if raw_graph is None:
                 return {
                     "status": "cannot_build",
@@ -153,13 +199,29 @@ class PipelineService:
             raw_graph=raw_graph,
             selected_capabilities=selected_capabilities,
         )
+        normalized_nodes, normalized_edges = self._apply_user_plan_order_hint(
+            message=message,
+            nodes=normalized_nodes,
+            edges=normalized_edges,
+            selected_capabilities=selected_capabilities,
+        )
 
         if len(selected_capabilities) >= 4 and len(normalized_nodes) < 3:
-            fallback_raw_graph = self._build_minimal_raw_graph(selected_capabilities)
+            top_capabilities = selected_capabilities[:3]
+            fallback_raw_graph = self._build_minimal_raw_graph(
+                top_capabilities,
+                user_query=message,
+            )
             if fallback_raw_graph is not None:
                 fallback_nodes, fallback_edges, fallback_ready, fallback_missing = self._prepare_graph(
                     raw_graph=fallback_raw_graph,
-                    selected_capabilities=selected_capabilities,
+                    selected_capabilities=top_capabilities,
+                )
+                fallback_nodes, fallback_edges = self._apply_user_plan_order_hint(
+                    message=message,
+                    nodes=fallback_nodes,
+                    edges=fallback_edges,
+                    selected_capabilities=top_capabilities,
                 )
                 if fallback_nodes:
                     normalized_nodes = fallback_nodes
@@ -171,11 +233,21 @@ class PipelineService:
         has_strict_capability_issues = self._has_strict_capability_issues(missing)
 
         if not is_ready and not has_strict_capability_issues:
-            fallback_raw_graph = self._build_minimal_raw_graph(selected_capabilities)
+            top_capabilities = selected_capabilities[:3]
+            fallback_raw_graph = self._build_minimal_raw_graph(
+                top_capabilities,
+                user_query=message,
+            )
             if fallback_raw_graph is not None:
                 fallback_nodes, fallback_edges, fallback_ready, fallback_missing = self._prepare_graph(
                     raw_graph=fallback_raw_graph,
-                    selected_capabilities=selected_capabilities,
+                    selected_capabilities=top_capabilities,
+                )
+                fallback_nodes, fallback_edges = self._apply_user_plan_order_hint(
+                    message=message,
+                    nodes=fallback_nodes,
+                    edges=fallback_edges,
+                    selected_capabilities=top_capabilities,
                 )
                 if fallback_ready:
                     normalized_nodes = fallback_nodes
@@ -404,6 +476,7 @@ class PipelineService:
     def _build_minimal_raw_graph(
         self,
         selected_capabilities: list[SelectedCapability],
+        user_query: str | None = None,
     ) -> dict[str, Any] | None:
         executable_caps: list[Any] = []
         for item in selected_capabilities:
@@ -424,7 +497,11 @@ class PipelineService:
         if not executable_caps:
             return None
 
-        ordered_caps = sorted(executable_caps, key=self._fallback_capability_order_key)
+        has_explicit_plan = bool(self._extract_user_plan_terms(user_query or ""))
+        if has_explicit_plan:
+            ordered_caps = executable_caps
+        else:
+            ordered_caps = sorted(executable_caps, key=self._fallback_capability_order_key)
 
         nodes: list[dict[str, Any]] = []
         edges: list[dict[str, Any]] = []
@@ -827,14 +904,27 @@ class PipelineService:
             "- node[3].input_connected_from = [1,2]\n"
             "- node[1].output_connected_to contains 3\n"
             "- node[2].output_connected_to contains 3\n\n"
-            "TARGET_LINEAR_PATTERN_IF_RELEVANT:\n"
-            "- Step 1: get recently active users\n"
-            "- Step 2: get top hotels\n"
-            "- Step 3: segment users by hotel interests (consumes 1+2)\n"
-            "- Step 4: assign specific hotels to users (consumes 3)\n"
-            "- Step 5: send personalized offers to users (consumes 4)\n"
-            "- Step 6: evaluate lead quality (consumes 5 and/or 4)\n"
         )
+        
+        # Only suggest linear pattern if it's explicitly mentioned in the query
+        if any(keyword in user_query.lower() for keyword in ["отели", "пользователей", "целевой", "сегмент", "assign", "offer"]):
+            instruction += (
+                "TARGET_LINEAR_PATTERN_IF_RELEVANT:\n"
+                "- Step 1: get recently active users\n"
+                "- Step 2: get top hotels\n"
+                "- Step 3: segment users by hotel interests (consumes 1+2)\n"
+                "- Step 4: assign specific hotels to users (consumes 3)\n"
+                "- Step 5: send personalized offers to users (consumes 4)\n"
+                "- Step 6: evaluate lead quality (consumes 5 and/or 4)\n"
+            )
+
+        ordered_terms = self._extract_user_plan_terms(user_query)
+        if ordered_terms:
+            instruction += (
+                "\nORDER_CONSTRAINT:\n"
+                "- USER_QUERY contains explicit step order hints. Preserve this order if matching capabilities exist.\n"
+                f"- Ordered hints: {json.dumps(ordered_terms, ensure_ascii=False)}\n"
+            )
 
         return (
             f"{instruction}\n\n"
@@ -887,6 +977,211 @@ class PipelineService:
             parts.append(self._strip_low_confidence_marker(dialog_summary))
         parts.extend(chunk for chunk in recent_chunks if chunk)
         return "\n".join(part for part in parts if part)
+
+    def _should_reuse_previous_graph(
+        self,
+        *,
+        message: str,
+        dialog_messages: list[dict[str, Any]],
+    ) -> bool:
+        if self._is_low_quality_message(message):
+            return False
+        if self._extract_user_plan_terms(message):
+            return False
+
+        normalized = (message or "").strip().lower()
+        if not normalized:
+            return False
+
+        refinement_markers = (
+            "измени",
+            "исправ",
+            "добав",
+            "убери",
+            "замени",
+            "обнов",
+            "перестро",
+            "допол",
+            "тот же",
+            "этот граф",
+            "предыдущ",
+            "modify",
+            "update",
+            "refine",
+            "change",
+            "same graph",
+            "previous graph",
+        )
+        if any(marker in normalized for marker in refinement_markers):
+            return True
+
+        # Reuse only when user is clearly continuing within the same dialog context.
+        recent_user_messages = [
+            str(item.get("content", ""))
+            for item in dialog_messages[-4:]
+            if isinstance(item, dict) and str(item.get("role", "")).lower() == "user"
+        ]
+        return bool(recent_user_messages and len(self._tokenize_text(normalized)) <= 5)
+
+    def _extract_user_plan_terms(self, message: str) -> list[str]:
+        text = str(message or "")
+        if not text.strip():
+            return []
+
+        terms: list[str] = []
+
+        numbered = re.findall(r"\b\d+\s*[\.)]\s*([A-Za-z_][A-Za-z0-9_]*)", text)
+        for item in numbered:
+            cleaned = item.strip()
+            if cleaned:
+                terms.append(cleaned)
+
+        if not terms and ("план выполнения" in text.lower() or "execution plan" in text.lower()):
+            right_part = text.split(":", 1)[-1]
+            chunks = [chunk.strip() for chunk in right_part.split("->") if chunk.strip()]
+            for chunk in chunks:
+                token_match = re.search(r"([A-Za-z_][A-Za-z0-9_]*)", chunk)
+                if token_match:
+                    terms.append(token_match.group(1))
+
+        unique_terms: list[str] = []
+        seen: set[str] = set()
+        for term in terms:
+            key = term.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            unique_terms.append(term)
+        return unique_terms
+
+    def _reorder_selected_capabilities_by_plan(
+        self,
+        *,
+        message: str,
+        selected_capabilities: list[SelectedCapability],
+    ) -> list[SelectedCapability]:
+        if len(selected_capabilities) < 2:
+            return selected_capabilities
+
+        ordered_terms = self._extract_user_plan_terms(message)
+        if len(ordered_terms) < 2:
+            return selected_capabilities
+
+        term_keys = [self._normalize_lookup_token(term) for term in ordered_terms]
+        indexed: list[tuple[int, int, SelectedCapability]] = []
+        for index, item in enumerate(selected_capabilities):
+            aliases = self._capability_aliases(item.capability)
+            rank = len(term_keys) + index
+            for term_index, term_key in enumerate(term_keys):
+                if not term_key:
+                    continue
+                if any(term_key in alias or alias in term_key for alias in aliases):
+                    rank = term_index
+                    break
+            indexed.append((rank, index, item))
+
+        indexed.sort(key=lambda row: (row[0], row[1]))
+        return [row[2] for row in indexed]
+
+    def _apply_user_plan_order_hint(
+        self,
+        *,
+        message: str,
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+        selected_capabilities: list[SelectedCapability],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        ordered_terms = self._extract_user_plan_terms(message)
+        if len(ordered_terms) < 2 or len(nodes) < 2:
+            return nodes, edges
+
+        capabilities_by_id = {
+            str(item.capability.id): item.capability for item in selected_capabilities
+        }
+
+        step_to_rank: dict[int, int] = {}
+        normalized_terms = [self._normalize_lookup_token(term) for term in ordered_terms]
+        for node in nodes:
+            step = node.get("step")
+            if not isinstance(step, int):
+                continue
+            endpoints = node.get("endpoints")
+            if not isinstance(endpoints, list) or not endpoints:
+                continue
+            first_endpoint = endpoints[0] if isinstance(endpoints[0], dict) else {}
+            cap_id = str(first_endpoint.get("capability_id", "") or "").strip()
+            capability = capabilities_by_id.get(cap_id)
+            if capability is None:
+                continue
+            aliases = self._capability_aliases(capability)
+            for term_index, term in enumerate(normalized_terms):
+                if not term:
+                    continue
+                if any(term in alias or alias in term for alias in aliases):
+                    step_to_rank[step] = term_index
+                    break
+
+        if len(step_to_rank) < 2:
+            return nodes, edges
+
+        sorted_nodes = sorted(
+            nodes,
+            key=lambda node: (
+                step_to_rank.get(node.get("step"), 10_000),
+                node.get("step", 10_000),
+            ),
+        )
+        step_remap: dict[int, int] = {}
+        remapped_nodes: list[dict[str, Any]] = []
+        for index, node in enumerate(sorted_nodes, start=1):
+            old_step = node.get("step")
+            if isinstance(old_step, int):
+                step_remap[old_step] = index
+            cloned = dict(node)
+            cloned["step"] = index
+            remapped_nodes.append(cloned)
+
+        remapped_edges: list[dict[str, Any]] = []
+        seen_edges: set[tuple[int, int, str]] = set()
+        for edge in edges:
+            src = edge.get("from_step")
+            dst = edge.get("to_step")
+            edge_type = str(edge.get("type", "") or "").strip()
+            if not isinstance(src, int) or not isinstance(dst, int):
+                continue
+            if src not in step_remap or dst not in step_remap or not edge_type:
+                continue
+            remapped = (step_remap[src], step_remap[dst], edge_type)
+            if remapped[0] == remapped[1] or remapped in seen_edges:
+                continue
+            seen_edges.add(remapped)
+            remapped_edges.append(
+                {
+                    "from_step": remapped[0],
+                    "to_step": remapped[1],
+                    "type": remapped[2],
+                }
+            )
+
+        self._sync_node_connections(remapped_nodes, remapped_edges)
+        self._ensure_external_inputs(remapped_nodes, remapped_edges)
+        return remapped_nodes, remapped_edges
+
+    def _capability_aliases(self, capability: Any) -> set[str]:
+        context = self._extract_capability_action_context(capability)
+        raw_aliases = [
+            str(getattr(capability, "name", "") or ""),
+            str(getattr(capability, "description", "") or ""),
+            str(context.get("operation_id", "") or ""),
+            str(context.get("summary", "") or ""),
+            str(context.get("path", "") or ""),
+        ]
+        aliases: set[str] = set()
+        for alias in raw_aliases:
+            normalized = self._normalize_lookup_token(alias)
+            if normalized:
+                aliases.add(normalized)
+        return aliases
 
     def _selection_is_low_confidence(
         self, selected_capabilities: list[SelectedCapability]

@@ -26,6 +26,7 @@ export type ExecutionHttpMethod =
 
 export interface RunPipelineRequest {
   inputs?: Record<string, unknown>;
+  dialog_id?: string | null;
 }
 
 export interface RunPipelineResponse {
@@ -77,6 +78,7 @@ export const runPipeline = async (
     method: 'POST',
     body: JSON.stringify({
       inputs: payload.inputs ?? {},
+      dialog_id: payload.dialog_id ?? null,
     }),
   });
 };

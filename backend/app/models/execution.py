@@ -42,6 +42,12 @@ class ExecutionRun(TimestampMixin, Base):
         nullable=False,
         index=True,
     )
+    dialog_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("pipeline_dialogs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     initiated_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),
