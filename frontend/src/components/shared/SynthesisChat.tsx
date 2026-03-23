@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Bot, RotateCcw, Send, Sparkles, User, X } from 'lucide-react';
+import { Bot, FileCode2, RotateCcw, Send, Sparkles, User, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -14,6 +14,9 @@ import {
 import { usePipelineContext } from '@/contexts/PipelineContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQueryClient } from '@tanstack/react-query';
+import { useActionsContext } from '@/contexts/ActionContext';
+import { SwaggerImportModal } from '@/components/shared/SwaggerImportModal';
+import { Action, Capability } from '@/types/action';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -57,6 +60,7 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
 }) => {
   const { setPipeline, setIsHydrating: setContextHydrating } = usePipelineContext();
   const { user } = useAuth();
+  const { addActions, addCapabilities } = useActionsContext();
   const queryClient = useQueryClient();
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -68,6 +72,8 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
   const [dialogId, setDialogId] = useState<string | null>(initialDialogId || null);
   const [isTyping, setIsTyping] = useState(false);
   const [isHydrating, setIsHydrating] = useState(true);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [importDialogId, setImportDialogId] = useState<string | null>(initialDialogId || null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const initialMessageProcessed = useRef(false);
   const storageKey = useMemo(() => buildDialogStorageKey(user?.id), [user?.id]);
@@ -201,6 +207,16 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
     };
   }, [initialDialogId, initialMessage, setPipeline, storageKey]);
 
+  const ensureDialogId = useCallback((): string => {
+    if (dialogId) {
+      return dialogId;
+    }
+    const newDialogId = generateUUID();
+    setDialogId(newDialogId);
+    localStorage.setItem(storageKey, newDialogId);
+    return newDialogId;
+  }, [dialogId, storageKey]);
+
   const handleSend = useCallback(
     async (overrideValue?: string) => {
       const valueToSend = overrideValue || inputValue;
@@ -208,12 +224,7 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
         return;
       }
 
-      let activeDialogId = dialogId;
-      if (!activeDialogId) {
-        activeDialogId = generateUUID();
-        setDialogId(activeDialogId);
-        localStorage.setItem(storageKey, activeDialogId);
-      }
+      const activeDialogId = ensureDialogId();
 
       const userMessage = valueToSend;
       setMessages((prev) => [
@@ -290,8 +301,14 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
         setIsTyping(false);
       }
     },
-    [dialogId, inputValue, isHydrating, isTyping, onSynthesize, setPipeline, storageKey]
+    [ensureDialogId, inputValue, isHydrating, isTyping, onSynthesize, setPipeline]
   );
+
+  const handleOpenImport = useCallback(() => {
+    const activeDialogId = ensureDialogId();
+    setImportDialogId(activeDialogId);
+    setIsImportModalOpen(true);
+  }, [ensureDialogId]);
 
   useEffect(() => {
     if (!initialMessage || isHydrating || initialMessageProcessed.current) {
@@ -393,6 +410,26 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
             >
               <RotateCcw className="h-3 w-3" /> Новый чат
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-[10px] gap-1 border-border"
+              onClick={handleOpenImport}
+            >
+              <FileCode2 className="h-3 w-3" /> Import OpenAPI
+            </Button>
+          </div>
+        )}
+        {messages.length <= 1 && (
+          <div className="flex gap-2 mb-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-[10px] gap-1 border-border"
+              onClick={handleOpenImport}
+            >
+              <FileCode2 className="h-3 w-3" /> Import OpenAPI
+            </Button>
           </div>
         )}
         <div className="relative">
@@ -414,6 +451,36 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
           </Button>
         </div>
       </div>
+
+      <SwaggerImportModal
+        isOpen={isImportModalOpen}
+        onClose={() => {
+          setIsImportModalOpen(false);
+          setImportDialogId(null);
+        }}
+        dialogId={importDialogId || dialogId || undefined}
+        onImport={(data, filename) => {
+          const importedActions = (data?.succeeded_actions || data?.actions || []) as Action[];
+          const importedCapabilities = (data?.capabilities || []) as Capability[];
+
+          if (importedActions.length > 0) {
+            addActions(importedActions);
+          }
+          if (importedCapabilities.length > 0) {
+            addCapabilities(importedCapabilities);
+          }
+
+          const importedLabel = filename || 'specification';
+          const importedCount = importedCapabilities.length || importedActions.length;
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: 'assistant',
+              content: `Импортировано из ${importedLabel}: ${importedCount} элементов. Теперь можно строить новый граф в этом чате.`,
+            },
+          ]);
+        }}
+      />
     </div>
   );
 };

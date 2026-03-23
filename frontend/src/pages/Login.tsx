@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { LogIn, Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -20,8 +20,14 @@ const Login: React.FC = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const { login } = useAuth();
+  const { login, isAuthenticated, token } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (isAuthenticated && token) {
+      window.location.replace("/");
+    }
+  }, [isAuthenticated, token]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,7 +40,8 @@ const Login: React.FC = () => {
     try {
       await login(email, password);
       toast.success("Logged in successfully");
-      navigate("/");
+      // Force a hard navigation to avoid any client-side auth sync race.
+      window.location.assign("/");
     } catch (error: any) {
       toast.error(error.message || "Login failed");
     } finally {

@@ -21,12 +21,14 @@ interface SwaggerImportModalProps {
   isOpen: boolean;
   onClose: () => void;
   onImport: (data: any, filename?: string) => void;
+  dialogId?: string;
 }
 
 export const SwaggerImportModal: React.FC<SwaggerImportModalProps> = ({
   isOpen,
   onClose,
   onImport,
+  dialogId,
 }) => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [spec, setSpec] = useState('');
@@ -61,13 +63,23 @@ export const SwaggerImportModal: React.FC<SwaggerImportModalProps> = ({
       toast.error('Пожалуйста, выберите файл');
       return;
     }
+    if (!dialogId) {
+      toast.error('Не удалось определить ID чата. Откройте чат заново и повторите импорт.');
+      return;
+    }
 
     setIsImporting(true);
     try {
       const formData = new FormData();
       // Отправляем файл напрямую как multipart/form-data
       formData.append('file', selectedFile);
-      const result = await apiRequest<any>(ENDPOINTS.ACTIONS.INGEST, {
+      if (dialogId) {
+        formData.append('dialog_id', dialogId);
+      }
+      const ingestUrl = dialogId
+        ? `${ENDPOINTS.ACTIONS.INGEST}?dialog_id=${encodeURIComponent(dialogId)}`
+        : ENDPOINTS.ACTIONS.INGEST;
+      const result = await apiRequest<any>(ingestUrl, {
         method: 'POST',
         body: formData,
       });
@@ -87,6 +99,10 @@ export const SwaggerImportModal: React.FC<SwaggerImportModalProps> = ({
       toast.error('Пожалуйста, вставьте содержимое спецификации');
       return;
     }
+    if (!dialogId) {
+      toast.error('Не удалось определить ID чата. Откройте чат заново и повторите импорт.');
+      return;
+    }
 
     setIsImporting(true);
     try {
@@ -94,7 +110,13 @@ export const SwaggerImportModal: React.FC<SwaggerImportModalProps> = ({
       // Создаем блоб из текста и отправляем как файл
       const specBlob = new Blob([spec], { type: 'application/json' });
       formData.append('file', specBlob, 'manual_import.json');
-      const result = await apiRequest<any>(ENDPOINTS.ACTIONS.INGEST, {
+      if (dialogId) {
+        formData.append('dialog_id', dialogId);
+      }
+      const ingestUrl = dialogId
+        ? `${ENDPOINTS.ACTIONS.INGEST}?dialog_id=${encodeURIComponent(dialogId)}`
+        : ENDPOINTS.ACTIONS.INGEST;
+      const result = await apiRequest<any>(ingestUrl, {
         method: 'POST',
         body: formData,
       });

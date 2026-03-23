@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -61,6 +63,32 @@ async def generate_pipeline(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail) from exc
 
     try:
+        requested_capability_ids: list[UUID] | None = payload.capability_ids
+        if requested_capability_ids is None:
+            bound_capability_ids = await dialog_memory.get_bound_capability_ids(str(payload.dialog_id))
+            if not bound_capability_ids:
+                response_payload = PipelineGenerateResponse(
+                    status="needs_input",
+                    message_ru="Для этого чата нет импортированных OpenAPI capabilities.",
+                    chat_reply_ru=(
+                        "Сначала импортируйте OpenAPI в этом чате. "
+                        "Capabilities из других чатов не используются."
+                    ),
+                    pipeline_id=None,
+                    nodes=[],
+                    edges=[],
+                    missing_requirements=["dialog:capabilities_not_imported"],
+                    context_summary=None,
+                )
+                await dialog_service.append_assistant_message(
+                    dialog_id=payload.dialog_id,
+                    user_id=current_user.id,
+                    content=response_payload.chat_reply_ru,
+                    assistant_payload=response_payload.model_dump(mode="json", exclude_none=True),
+                )
+                return response_payload
+            requested_capability_ids = [UUID(item) for item in bound_capability_ids]
+
         # Only reuse previous pipeline if dialog has multiple messages (iterative refinement)
         # For fresh/single-message dialogs, always generate new pipeline
         previous_pipeline_id = None
@@ -74,7 +102,7 @@ async def generate_pipeline(
             dialog_id=payload.dialog_id,
             message=payload.message,
             user_id=current_user.id,
-            capability_ids=payload.capability_ids,
+            capability_ids=requested_capability_ids,
             previous_pipeline_id=previous_pipeline_id,
         )
     except Exception as exc:

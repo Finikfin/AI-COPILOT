@@ -179,8 +179,11 @@ class PipelineService:
         try:
             raw_graph = self.generate_raw_graph(message, selected_capabilities, prompt)
         except Exception:
-            # Use only top-3 selected capabilities for fallback, not all
-            top_capabilities = selected_capabilities[:3] if len(selected_capabilities) > 3 else selected_capabilities
+            top_capabilities = self._select_fallback_capabilities(
+                message=message,
+                selected_capabilities=selected_capabilities,
+                max_items=4,
+            )
             raw_graph = self._build_minimal_raw_graph(
                 top_capabilities,
                 user_query=message,
@@ -205,9 +208,19 @@ class PipelineService:
             edges=normalized_edges,
             selected_capabilities=selected_capabilities,
         )
+        normalized_nodes, normalized_edges = self._enforce_segment_merge_edges(
+            message=message,
+            nodes=normalized_nodes,
+            edges=normalized_edges,
+            selected_capabilities=selected_capabilities,
+        )
 
         if len(selected_capabilities) >= 4 and len(normalized_nodes) < 3:
-            top_capabilities = selected_capabilities[:3]
+            top_capabilities = self._select_fallback_capabilities(
+                message=message,
+                selected_capabilities=selected_capabilities,
+                max_items=4,
+            )
             fallback_raw_graph = self._build_minimal_raw_graph(
                 top_capabilities,
                 user_query=message,
@@ -223,6 +236,12 @@ class PipelineService:
                     edges=fallback_edges,
                     selected_capabilities=top_capabilities,
                 )
+                fallback_nodes, fallback_edges = self._enforce_segment_merge_edges(
+                    message=message,
+                    nodes=fallback_nodes,
+                    edges=fallback_edges,
+                    selected_capabilities=top_capabilities,
+                )
                 if fallback_nodes:
                     normalized_nodes = fallback_nodes
                     normalized_edges = fallback_edges
@@ -233,7 +252,11 @@ class PipelineService:
         has_strict_capability_issues = self._has_strict_capability_issues(missing)
 
         if not is_ready and not has_strict_capability_issues:
-            top_capabilities = selected_capabilities[:3]
+            top_capabilities = self._select_fallback_capabilities(
+                message=message,
+                selected_capabilities=selected_capabilities,
+                max_items=4,
+            )
             fallback_raw_graph = self._build_minimal_raw_graph(
                 top_capabilities,
                 user_query=message,
@@ -244,6 +267,12 @@ class PipelineService:
                     selected_capabilities=top_capabilities,
                 )
                 fallback_nodes, fallback_edges = self._apply_user_plan_order_hint(
+                    message=message,
+                    nodes=fallback_nodes,
+                    edges=fallback_edges,
+                    selected_capabilities=top_capabilities,
+                )
+                fallback_nodes, fallback_edges = self._enforce_segment_merge_edges(
                     message=message,
                     nodes=fallback_nodes,
                     edges=fallback_edges,
@@ -1044,6 +1073,16 @@ class PipelineService:
                 if token_match:
                     terms.append(token_match.group(1))
 
+        if not terms:
+            return []
+
+        raw_terms_normalized = [self._normalize_lookup_token(item) for item in terms if item]
+        raw_terms_normalized = [item for item in raw_terms_normalized if item]
+
+        # Reject malformed plans with duplicated explicit steps.
+        if len(raw_terms_normalized) != len(set(raw_terms_normalized)):
+            return []
+
         unique_terms: list[str] = []
         seen: set[str] = set()
         for term in terms:
@@ -1052,7 +1091,46 @@ class PipelineService:
                 continue
             seen.add(key)
             unique_terms.append(term)
+
+        if not self._is_plan_terms_consistent_with_message(message=message, terms=unique_terms):
+            return []
         return unique_terms
+
+    def _is_plan_terms_consistent_with_message(
+        self,
+        *,
+        message: str,
+        terms: list[str],
+    ) -> bool:
+        if not terms:
+            return False
+
+        message_lower = (message or "").lower()
+        term_tokens = [self._normalize_lookup_token(term) for term in terms]
+
+        has_segment_in_plan = any("segment" in token for token in term_tokens)
+        has_user_in_plan = any("user" in token or "client" in token for token in term_tokens)
+        has_hotel_in_plan = any("hotel" in token for token in term_tokens)
+        has_assign_in_plan = any("assign" in token for token in term_tokens)
+        has_send_in_plan = any("send" in token or "offer" in token or "email" in token for token in term_tokens)
+        has_qualify_in_plan = any("qualify" in token or "lead" in token for token in term_tokens)
+
+        mentions_users = ("пользоват" in message_lower) or ("user" in message_lower)
+        mentions_hotels = ("отел" in message_lower) or ("hotel" in message_lower)
+        mentions_assign = ("назнач" in message_lower) or ("assign" in message_lower)
+        mentions_send = ("разосл" in message_lower) or ("send" in message_lower) or ("offer" in message_lower)
+
+        # If user asks for segmentation by hotel interests, plan must include user and hotel collectors.
+        if has_segment_in_plan and mentions_users and mentions_hotels:
+            if not (has_user_in_plan and has_hotel_in_plan):
+                return False
+
+        # If user asks for lead qualification flow, plan should include upstream assign/send stages.
+        if has_qualify_in_plan and (mentions_assign or mentions_send):
+            if not (has_assign_in_plan or has_send_in_plan):
+                return False
+
+        return True
 
     def _reorder_selected_capabilities_by_plan(
         self,
@@ -1182,6 +1260,189 @@ class PipelineService:
             if normalized:
                 aliases.add(normalized)
         return aliases
+
+    def _select_fallback_capabilities(
+        self,
+        *,
+        message: str,
+        selected_capabilities: list[SelectedCapability],
+        max_items: int = 4,
+    ) -> list[SelectedCapability]:
+        if len(selected_capabilities) <= max_items:
+            return selected_capabilities
+
+        message_lower = (message or "").lower()
+        need_users = ("пользоват" in message_lower) or ("user" in message_lower)
+        need_hotels = ("отел" in message_lower) or ("hotel" in message_lower)
+        need_segment = ("сегмент" in message_lower) or ("segment" in message_lower)
+        need_assign = ("назнач" in message_lower) or ("assign" in message_lower)
+
+        def category(item: SelectedCapability) -> str:
+            signature = self._fallback_capability_signature(item.capability)
+            if "segment" in signature:
+                return "segment"
+            if "assign" in signature:
+                return "assign"
+            if "hotel" in signature:
+                return "hotel"
+            if "user" in signature or "client" in signature:
+                return "user"
+            return "other"
+
+        by_category: dict[str, list[SelectedCapability]] = {
+            "user": [],
+            "hotel": [],
+            "segment": [],
+            "assign": [],
+            "other": [],
+        }
+        for item in selected_capabilities:
+            by_category[category(item)].append(item)
+
+        selected: list[SelectedCapability] = []
+        seen_ids: set[str] = set()
+
+        def add_first(cat: str) -> None:
+            for candidate in by_category.get(cat, []):
+                cap_id = str(getattr(candidate.capability, "id", "") or "")
+                if cap_id and cap_id in seen_ids:
+                    continue
+                if cap_id:
+                    seen_ids.add(cap_id)
+                selected.append(candidate)
+                return
+
+        if need_users and need_segment:
+            add_first("user")
+        if need_hotels and need_segment:
+            add_first("hotel")
+        if need_segment:
+            add_first("segment")
+        if need_assign:
+            add_first("assign")
+
+        target_len = max(max_items, len(selected))
+        for item in selected_capabilities:
+            if len(selected) >= target_len:
+                break
+            cap_id = str(getattr(item.capability, "id", "") or "")
+            if cap_id and cap_id in seen_ids:
+                continue
+            if cap_id:
+                seen_ids.add(cap_id)
+            selected.append(item)
+
+        return selected[:target_len]
+
+    def _enforce_segment_merge_edges(
+        self,
+        *,
+        message: str,
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+        selected_capabilities: list[SelectedCapability],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        if len(nodes) < 3:
+            return nodes, edges
+
+        normalized_message = self._normalize_lookup_token(message)
+        if "segment" not in normalized_message and "сегмент" not in normalized_message:
+            return nodes, edges
+
+        capabilities_by_id = {
+            str(item.capability.id): item.capability for item in selected_capabilities
+        }
+
+        step_to_signature: dict[int, str] = {}
+        for node in nodes:
+            step = node.get("step")
+            if not isinstance(step, int):
+                continue
+            endpoints = node.get("endpoints")
+            if not isinstance(endpoints, list) or not endpoints:
+                continue
+            endpoint = endpoints[0] if isinstance(endpoints[0], dict) else {}
+            cap_id = str(endpoint.get("capability_id", "") or "").strip()
+            capability = capabilities_by_id.get(cap_id)
+            if capability is None:
+                continue
+            step_to_signature[step] = self._fallback_capability_signature(capability)
+
+        if not step_to_signature:
+            return nodes, edges
+
+        incoming_by_target: dict[int, set[int]] = {}
+        seen_edges: set[tuple[int, int, str]] = set()
+        normalized_edges: list[dict[str, Any]] = []
+        for edge in edges:
+            src = edge.get("from_step")
+            dst = edge.get("to_step")
+            edge_type = str(edge.get("type", "") or "").strip()
+            if not isinstance(src, int) or not isinstance(dst, int) or not edge_type:
+                continue
+            key = (src, dst, edge_type)
+            if key in seen_edges:
+                continue
+            seen_edges.add(key)
+            normalized_edges.append(
+                {
+                    "from_step": src,
+                    "to_step": dst,
+                    "type": edge_type,
+                }
+            )
+            incoming_by_target.setdefault(dst, set()).add(src)
+
+        segment_steps = [
+            step for step, signature in step_to_signature.items() if "segment" in signature
+        ]
+        if not segment_steps:
+            return nodes, normalized_edges
+
+        for segment_step in segment_steps:
+            predecessors = [
+                step for step in step_to_signature.keys() if step < segment_step
+            ]
+            if not predecessors:
+                continue
+
+            user_step = None
+            hotel_step = None
+            for step in sorted(predecessors):
+                signature = step_to_signature.get(step, "")
+                if user_step is None and ("user" in signature or "client" in signature):
+                    user_step = step
+                if hotel_step is None and "hotel" in signature:
+                    hotel_step = step
+
+            if user_step is None or hotel_step is None:
+                continue
+
+            current_incoming = incoming_by_target.get(segment_step, set())
+            additions: list[tuple[int, str]] = []
+            if user_step not in current_incoming:
+                additions.append((user_step, "users"))
+            if hotel_step not in current_incoming:
+                additions.append((hotel_step, "hotels"))
+
+            for src_step, edge_type in additions:
+                key = (src_step, segment_step, edge_type)
+                if key in seen_edges:
+                    continue
+                seen_edges.add(key)
+                normalized_edges.append(
+                    {
+                        "from_step": src_step,
+                        "to_step": segment_step,
+                        "type": edge_type,
+                    }
+                )
+                incoming_by_target.setdefault(segment_step, set()).add(src_step)
+
+        normalized_edges = self._repair_edges_with_data_flow(nodes, normalized_edges)
+        self._sync_node_connections(nodes, normalized_edges)
+        self._ensure_external_inputs(nodes, normalized_edges)
+        return nodes, normalized_edges
 
     def _selection_is_low_confidence(
         self, selected_capabilities: list[SelectedCapability]

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -21,8 +21,14 @@ const Register: React.FC = () => {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const { register } = useAuth();
+  const { register, isAuthenticated, token } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (isAuthenticated && token) {
+      window.location.replace("/");
+    }
+  }, [isAuthenticated, token]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -52,7 +58,8 @@ const Register: React.FC = () => {
     try {
       await register(email, fullName, password);
       toast.success("Аккаунт успешно создан!");
-      navigate("/");
+      // Force a hard navigation to avoid any client-side auth sync race.
+      window.location.assign("/");
     } catch (error: any) {
       toast.error(error.message || "Ошибка регистрации");
     } finally {

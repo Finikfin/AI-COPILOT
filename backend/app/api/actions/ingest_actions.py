@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database.session import get_session
 from app.models import Action, ActionIngestStatus, User
 from app.schemas.capability_sch import ActionIngestWithCapabilitiesResponse
 from app.services.capability_service import CapabilityService
+from app.services.dialog_memory import DialogMemoryService
 from app.services.openapi_service import OpenAPIService
 from app.utils.business_logger import log_business_event
 from app.utils.token_manager import get_current_user
@@ -19,9 +22,12 @@ router = APIRouter(tags=["Actions"])
 async def ingest_actions(
     request: Request,
     file: UploadFile = File(...),
+    dialog_id_form: UUID | None = Form(default=None, alias="dialog_id"),
+    dialog_id_query: UUID | None = Query(default=None, alias="dialog_id"),
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
+    dialog_id = dialog_id_form or dialog_id_query
     trace_id = getattr(request.state, "traceId", None)
     payload = await file.read()
     try:
@@ -64,6 +70,20 @@ async def ingest_actions(
         owner_user_id=current_user.id,
         refresh=False,
     )
+
+    if dialog_id is not None and succeeded_actions:
+        action_ids = [action.id for action in succeeded_actions]
+        scoped_capabilities = await capability_service.get_capabilities(
+            action_ids=action_ids,
+            owner_user_id=current_user.id,
+            include_all=False,
+        )
+        dialog_memory = DialogMemoryService()
+        await dialog_memory.bind_capabilities(
+            str(dialog_id),
+            [str(capability.id) for capability in scoped_capabilities],
+        )
+
     await session.commit()
 
     for action in actions:
@@ -80,6 +100,7 @@ async def ingest_actions(
         succeeded_count=len(succeeded_actions),
         failed_count=len(failed_actions),
         created_capabilities_count=len(capabilities),
+        dialog_id=str(dialog_id) if dialog_id is not None else None,
     )
 
     return ActionIngestWithCapabilitiesResponse(

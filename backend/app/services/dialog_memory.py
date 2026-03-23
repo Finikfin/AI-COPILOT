@@ -56,6 +56,37 @@ class DialogMemoryService:
             return
         await redis.delete(self._messages_key(dialog_id), self._summary_key(dialog_id))
 
+    async def bind_capabilities(self, dialog_id: str, capability_ids: list[str]) -> None:
+        redis = await self._get_redis()
+        if redis is None:
+            return
+
+        normalized = [str(item).strip() for item in capability_ids if str(item).strip()]
+        if not normalized:
+            return
+
+        key = self._capabilities_key(dialog_id)
+        # Keep unique values while preserving insertion order.
+        current = await self.get_bound_capability_ids(dialog_id)
+        merged = list(dict.fromkeys(current + normalized))
+        await redis.set(key, json.dumps(merged, ensure_ascii=False), ex=self.ttl_seconds)
+
+    async def get_bound_capability_ids(self, dialog_id: str) -> list[str]:
+        redis = await self._get_redis()
+        if redis is None:
+            return []
+
+        raw = await redis.get(self._capabilities_key(dialog_id))
+        if not raw:
+            return []
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(parsed, list):
+            return []
+        return [str(item).strip() for item in parsed if str(item).strip()]
+
     async def _get_redis(self):
         if aioredis is None:
             return None
@@ -71,6 +102,9 @@ class DialogMemoryService:
 
     def _summary_key(self, dialog_id: str) -> str:
         return f"dialog:{dialog_id}:summary"
+
+    def _capabilities_key(self, dialog_id: str) -> str:
+        return f"dialog:{dialog_id}:capabilities"
 
     def _decode_messages(self, payload: str | None) -> list[dict[str, Any]]:
         if not payload:

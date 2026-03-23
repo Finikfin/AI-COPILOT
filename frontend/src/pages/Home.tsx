@@ -25,20 +25,32 @@ const Home: React.FC = () => {
 Оценить качество лидов`;
 
   const { addActions, addCapabilities, capabilities } = useActionsContext();
-  const isChatDisabled = capabilities.length === 0;
+  const [homeDialogId, setHomeDialogId] = useState<string | null>(null);
+  const [importDialogId, setImportDialogId] = useState<string | null>(null);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isResultsModalOpen, setIsResultsModalOpen] = useState(false);
   const [importResults, setImportResults] = useState<{ succeeded_actions: Action[], failed_actions: any[] } | null>(null);
   const [chatMessage, setChatMessage] = useState('');
   const [importedFiles, setImportedFiles] = useState<string[]>([]);
+  const isChatDisabled = importedFiles.length === 0;
   const navigate = useNavigate();
+
+  const ensureHomeDialogId = () => {
+    if (homeDialogId) {
+      return homeDialogId;
+    }
+    const next = generateUUID();
+    setHomeDialogId(next);
+    return next;
+  };
 
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatMessage.trim()) return;
+    if (isChatDisabled) return;
 
-    const dialogId = generateUUID();
+    const dialogId = ensureHomeDialogId();
 
     navigate('/pipelines', {
       state: {
@@ -46,7 +58,17 @@ const Home: React.FC = () => {
         dialogId: dialogId
       }
     });
+
+    // Reset Home state so the next scenario starts with a fresh dialog context.
+    setHomeDialogId(null);
+    setImportedFiles([]);
     setChatMessage('');
+  };
+
+  const handleOpenImportModal = () => {
+    const activeDialogId = ensureHomeDialogId();
+    setImportDialogId(activeDialogId);
+    setIsImportModalOpen(true);
   };
 
   const handleCopyPrompt = async () => {
@@ -136,7 +158,7 @@ const Home: React.FC = () => {
                   <Input
                     value={chatMessage}
                     onChange={(e) => setChatMessage(e.target.value)}
-                    placeholder={capabilities.length > 0 ? "Сценарий готов к постройке..." : "Загрузите Swagger для начала работы"}
+                    placeholder={importedFiles.length > 0 ? "Сценарий готов к постройке..." : "Загрузите OpenAPI для этого чата"}
                     className={cn(
                       "bg-transparent border-none shadow-none h-12 pl-4 pr-16 text-lg focus-visible:ring-0",
                       isChatDisabled && "opacity-50 pointer-events-none"
@@ -160,7 +182,7 @@ const Home: React.FC = () => {
               </TooltipTrigger>
               {isChatDisabled && (
                 <TooltipContent side="top" sideOffset={10} className="bg-card/95 backdrop-blur-md border-border shadow-xl">
-                  <p className="text-sm font-medium">Сначала загрузите Swagger спецификацию</p>
+                  <p className="text-sm font-medium">Сначала загрузите OpenAPI для этого нового чата</p>
                 </TooltipContent>
               )}
             </Tooltip>
@@ -169,7 +191,7 @@ const Home: React.FC = () => {
             <Button
               variant="outline"
               className="gap-2 border-border bg-card/50 backdrop-blur-sm hover:bg-accent transition-all animate-in fade-in zoom-in duration-500 delay-300"
-              onClick={() => setIsImportModalOpen(true)}
+              onClick={handleOpenImportModal}
             >
               <FileJson className="h-4 w-4 text-primary" />
               Import Swagger
@@ -227,7 +249,11 @@ const Home: React.FC = () => {
       {/* Modals */}
       <SwaggerImportModal
         isOpen={isImportModalOpen}
-        onClose={() => setIsImportModalOpen(false)}
+        onClose={() => {
+          setIsImportModalOpen(false);
+          setImportDialogId(null);
+        }}
+        dialogId={importDialogId || homeDialogId || undefined}
         onImport={(data, filename) => {
           if (data && (data.succeeded_actions || data.actions)) {
             const successList = data.succeeded_actions || data.actions || [];

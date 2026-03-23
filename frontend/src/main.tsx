@@ -15,6 +15,15 @@
 import { createRoot } from 'react-dom/client'
 import App from './App.tsx'
 import './index.css'
+import { AppErrorBoundary } from '@/components/shared/AppErrorBoundary'
+
+window.addEventListener('error', (event) => {
+	console.error('Global window error', event.error || event.message)
+})
+
+window.addEventListener('unhandledrejection', (event) => {
+	console.error('Unhandled promise rejection', event.reason)
+})
 
 /**
  * Initialize and render the React application
@@ -22,4 +31,8 @@ import './index.css'
  * Creates a React root and renders the main App component into the DOM.
  * The application is mounted to the element with id "root".
  */
-createRoot(document.getElementById("root")!).render(<App />);
+createRoot(document.getElementById("root")!).render(
+	<AppErrorBoundary>
+		<App />
+	</AppErrorBoundary>
+);
