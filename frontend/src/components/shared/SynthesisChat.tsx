@@ -314,6 +314,10 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
     if (!initialMessage || isHydrating || initialMessageProcessed.current) {
       return;
     }
+    if (initialDialogId && dialogId && dialogId !== initialDialogId) {
+      // New chat was started locally; never replay bootstrap message into a different dialog.
+      return;
+    }
     // Only send the initial message if we have no real messages yet (history is empty)
     const hasRealMessages = 
       messages.length > 1 || 
@@ -327,7 +331,9 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
 
   const handleStartNewChat = () => {
     const newDialogId = generateUUID();
+    initialMessageProcessed.current = true;
     setDialogId(newDialogId);
+    setImportDialogId(newDialogId);
     localStorage.setItem(storageKey, newDialogId);
     setMessages([{ role: 'assistant', content: DEFAULT_ASSISTANT_MESSAGE }]);
     setPipeline(null);

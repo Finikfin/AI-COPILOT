@@ -27,6 +27,8 @@ class PipelineService:
         "graph:invalid_capability_ref",
         "graph:missing_capability_ref",
     }
+    CAPABILITY_SELECTION_LIMIT = 8
+    FALLBACK_CAPABILITIES_LIMIT = 8
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -104,13 +106,37 @@ class PipelineService:
                 self.session,
                 selection_query,
                 owner_user_id=user_id,
-                limit=5,
+                limit=self.CAPABILITY_SELECTION_LIMIT,
             )
 
         selected_capabilities = self._reorder_selected_capabilities_by_plan(
             message=message,
             selected_capabilities=selected_capabilities,
         )
+        selected_capabilities = self._filter_capabilities_by_explicit_plan(
+            message=message,
+            selected_capabilities=selected_capabilities,
+        )
+        selected_capabilities = self._filter_capabilities_by_negative_intent(
+            message=message,
+            selected_capabilities=selected_capabilities,
+        )
+        selected_capabilities = self._filter_send_capabilities_by_negative_intent(
+            message=message,
+            selected_capabilities=selected_capabilities,
+        )
+        selected_capabilities = self._filter_capabilities_by_positive_intent(
+            message=message,
+            selected_capabilities=selected_capabilities,
+        )
+
+        plan_aligned_capabilities = self._select_capabilities_by_explicit_plan_terms(
+            message=message,
+            selected_capabilities=selected_capabilities,
+        )
+        use_explicit_plan_mode = len(plan_aligned_capabilities) >= 2
+        if use_explicit_plan_mode:
+            selected_capabilities = plan_aligned_capabilities
 
         previous_pipeline: Pipeline | None = None
         previous_nodes: list[dict[str, Any]] = []
@@ -167,36 +193,44 @@ class PipelineService:
                 "context_summary": dialog_summary,
             }
 
-        prompt = self._build_generation_prompt(
-            user_query=message,
-            selected_capabilities=selected_capabilities,
-            dialog_messages=dialog_messages,
-            dialog_summary=dialog_summary,
-            previous_nodes=previous_nodes,
-            previous_edges=previous_edges,
-        )
-
-        try:
-            raw_graph = self.generate_raw_graph(message, selected_capabilities, prompt)
-        except Exception:
-            top_capabilities = self._select_fallback_capabilities(
-                message=message,
-                selected_capabilities=selected_capabilities,
-                max_items=4,
-            )
+        raw_graph: dict[str, Any] | None = None
+        if use_explicit_plan_mode:
             raw_graph = self._build_minimal_raw_graph(
-                top_capabilities,
+                selected_capabilities,
                 user_query=message,
             )
-            if raw_graph is None:
-                return {
-                    "status": "cannot_build",
-                    "message_ru": "Не удалось построить сценарий. Нет доступной исполнимой capability.",
-                    "chat_reply_ru": "Не удалось построить сценарий. Попробуйте уточнить запрос.",
-                    "nodes": [],
-                    "edges": [],
-                    "context_summary": dialog_summary,
-                }
+
+        if raw_graph is None:
+            prompt = self._build_generation_prompt(
+                user_query=message,
+                selected_capabilities=selected_capabilities,
+                dialog_messages=dialog_messages,
+                dialog_summary=dialog_summary,
+                previous_nodes=previous_nodes,
+                previous_edges=previous_edges,
+            )
+
+            try:
+                raw_graph = self.generate_raw_graph(message, selected_capabilities, prompt)
+            except Exception:
+                top_capabilities = self._select_fallback_capabilities(
+                    message=message,
+                    selected_capabilities=selected_capabilities,
+                    max_items=self.FALLBACK_CAPABILITIES_LIMIT,
+                )
+                raw_graph = self._build_minimal_raw_graph(
+                    top_capabilities,
+                    user_query=message,
+                )
+                if raw_graph is None:
+                    return {
+                        "status": "cannot_build",
+                        "message_ru": "Не удалось построить сценарий. Нет доступной исполнимой capability.",
+                        "chat_reply_ru": "Не удалось построить сценарий. Попробуйте уточнить запрос.",
+                        "nodes": [],
+                        "edges": [],
+                        "context_summary": dialog_summary,
+                    }
 
         normalized_nodes, normalized_edges, is_ready, missing = self._prepare_graph(
             raw_graph=raw_graph,
@@ -214,12 +248,23 @@ class PipelineService:
             edges=normalized_edges,
             selected_capabilities=selected_capabilities,
         )
+        normalized_nodes, normalized_edges = self._enforce_explicit_plan_step_count(
+            message=message,
+            nodes=normalized_nodes,
+            edges=normalized_edges,
+        )
+        normalized_nodes, normalized_edges = self._prune_unsolicited_send_nodes(
+            message=message,
+            nodes=normalized_nodes,
+            edges=normalized_edges,
+            selected_capabilities=selected_capabilities,
+        )
 
         if len(selected_capabilities) >= 4 and len(normalized_nodes) < 3:
             top_capabilities = self._select_fallback_capabilities(
                 message=message,
                 selected_capabilities=selected_capabilities,
-                max_items=4,
+                max_items=self.FALLBACK_CAPABILITIES_LIMIT,
             )
             fallback_raw_graph = self._build_minimal_raw_graph(
                 top_capabilities,
@@ -237,6 +282,17 @@ class PipelineService:
                     selected_capabilities=top_capabilities,
                 )
                 fallback_nodes, fallback_edges = self._enforce_segment_merge_edges(
+                    message=message,
+                    nodes=fallback_nodes,
+                    edges=fallback_edges,
+                    selected_capabilities=top_capabilities,
+                )
+                fallback_nodes, fallback_edges = self._enforce_explicit_plan_step_count(
+                    message=message,
+                    nodes=fallback_nodes,
+                    edges=fallback_edges,
+                )
+                fallback_nodes, fallback_edges = self._prune_unsolicited_send_nodes(
                     message=message,
                     nodes=fallback_nodes,
                     edges=fallback_edges,
@@ -255,7 +311,7 @@ class PipelineService:
             top_capabilities = self._select_fallback_capabilities(
                 message=message,
                 selected_capabilities=selected_capabilities,
-                max_items=4,
+                max_items=self.FALLBACK_CAPABILITIES_LIMIT,
             )
             fallback_raw_graph = self._build_minimal_raw_graph(
                 top_capabilities,
@@ -273,6 +329,17 @@ class PipelineService:
                     selected_capabilities=top_capabilities,
                 )
                 fallback_nodes, fallback_edges = self._enforce_segment_merge_edges(
+                    message=message,
+                    nodes=fallback_nodes,
+                    edges=fallback_edges,
+                    selected_capabilities=top_capabilities,
+                )
+                fallback_nodes, fallback_edges = self._enforce_explicit_plan_step_count(
+                    message=message,
+                    nodes=fallback_nodes,
+                    edges=fallback_edges,
+                )
+                fallback_nodes, fallback_edges = self._prune_unsolicited_send_nodes(
                     message=message,
                     nodes=fallback_nodes,
                     edges=fallback_edges,
@@ -935,17 +1002,37 @@ class PipelineService:
             "- node[2].output_connected_to contains 3\n\n"
         )
         
-        # Only suggest linear pattern if it's explicitly mentioned in the query
-        if any(keyword in user_query.lower() for keyword in ["отели", "пользователей", "целевой", "сегмент", "assign", "offer"]):
+        # Suggest canonical CRM flow only for stages explicitly requested by user.
+        user_query_lower = (user_query or "").lower()
+        mentions_crm_flow = any(
+            keyword in user_query_lower
+            for keyword in ["отел", "hotel", "пользоват", "user", "segment", "assign", "offer", "email"]
+        )
+        mentions_send = any(
+            keyword in user_query_lower for keyword in ["send", "offer", "email", "разосл", "письм"]
+        )
+        if self._message_forbids_send_offers(user_query):
+            mentions_send = False
+        mentions_qualify = any(
+            keyword in user_query_lower for keyword in ["qualify", "lead", "лид", "квалиф"]
+        )
+        forbid_qualify = self._message_forbids_lead_qualification(user_query)
+
+        if mentions_crm_flow:
             instruction += (
                 "TARGET_LINEAR_PATTERN_IF_RELEVANT:\n"
                 "- Step 1: get recently active users\n"
                 "- Step 2: get top hotels\n"
                 "- Step 3: segment users by hotel interests (consumes 1+2)\n"
                 "- Step 4: assign specific hotels to users (consumes 3)\n"
-                "- Step 5: send personalized offers to users (consumes 4)\n"
-                "- Step 6: evaluate lead quality (consumes 5 and/or 4)\n"
             )
+            if mentions_send:
+                instruction += "- Step 5: send personalized offers to users (consumes 4)\n"
+            if mentions_qualify and not forbid_qualify:
+                if mentions_send:
+                    instruction += "- Step 6: evaluate lead quality (consumes 5 and/or 4)\n"
+                else:
+                    instruction += "- Step 5: evaluate lead quality (consumes 4)\n"
 
         ordered_terms = self._extract_user_plan_terms(user_query)
         if ordered_terms:
@@ -1096,6 +1183,139 @@ class PipelineService:
             return []
         return unique_terms
 
+    def _message_forbids_lead_qualification(self, message: str) -> bool:
+        message_lower = (message or "").lower()
+        has_lead_term = any(
+            token in message_lower
+            for token in ["lead", "qualify", "лид", "квалиф", "оценк"]
+        )
+        if not has_lead_term:
+            return False
+
+        negative_markers = [
+            "не нужно",
+            "не надо",
+            "не должен",
+            "не должна",
+            "не должно",
+            "без",
+            "исключ",
+            "убери",
+            "remove",
+            "without",
+            "no lead",
+            "do not",
+            "don't",
+        ]
+        return any(marker in message_lower for marker in negative_markers)
+
+    def _message_forbids_send_offers(self, message: str) -> bool:
+        message_lower = (message or "").lower()
+        has_send_term = any(
+            token in message_lower
+            for token in ["send", "email", "offer", "почт", "разосл", "письм", "присыл"]
+        )
+        if not has_send_term:
+            return False
+
+        negative_markers = [
+            "не нужно",
+            "не надо",
+            "не должен",
+            "не должна",
+            "не должно",
+            "не просил",
+            "без",
+            "исключ",
+            "убери",
+            "remove",
+            "without",
+            "do not",
+            "don't",
+            "no email",
+            "no send",
+        ]
+        return any(marker in message_lower for marker in negative_markers)
+
+    def _message_requests_send_offers(self, message: str) -> bool:
+        message_lower = (message or "").lower()
+        if self._message_forbids_send_offers(message):
+            return False
+        return any(
+            token in message_lower
+            for token in ["send", "email", "offer", "почт", "разосл", "письм", "присыл"]
+        )
+
+    def _message_requests_lead_qualification(self, message: str) -> bool:
+        message_lower = (message or "").lower()
+        return any(
+            token in message_lower
+            for token in ["lead", "qualify", "лид", "квалиф", "оценк лид"]
+        )
+
+    def _filter_capabilities_by_negative_intent(
+        self,
+        *,
+        message: str,
+        selected_capabilities: list[SelectedCapability],
+    ) -> list[SelectedCapability]:
+        if not selected_capabilities:
+            return selected_capabilities
+        if not self._message_forbids_lead_qualification(message):
+            return selected_capabilities
+
+        filtered = [
+            item
+            for item in selected_capabilities
+            if all(
+                token not in self._fallback_capability_signature(item.capability)
+                for token in ("lead", "qualify")
+            )
+        ]
+        return filtered or selected_capabilities
+
+    def _filter_send_capabilities_by_negative_intent(
+        self,
+        *,
+        message: str,
+        selected_capabilities: list[SelectedCapability],
+    ) -> list[SelectedCapability]:
+        if not selected_capabilities:
+            return selected_capabilities
+        if not self._message_forbids_send_offers(message):
+            return selected_capabilities
+
+        filtered = [
+            item
+            for item in selected_capabilities
+            if all(
+                token not in self._fallback_capability_signature(item.capability)
+                for token in ("send", "email", "offer")
+            )
+        ]
+        return filtered or selected_capabilities
+
+    def _filter_capabilities_by_positive_intent(
+        self,
+        *,
+        message: str,
+        selected_capabilities: list[SelectedCapability],
+    ) -> list[SelectedCapability]:
+        if not selected_capabilities:
+            return selected_capabilities
+        if self._message_requests_lead_qualification(message):
+            return selected_capabilities
+
+        filtered = [
+            item
+            for item in selected_capabilities
+            if all(
+                token not in self._fallback_capability_signature(item.capability)
+                for token in ("lead", "qualify")
+            )
+        ]
+        return filtered or selected_capabilities
+
     def _is_plan_terms_consistent_with_message(
         self,
         *,
@@ -1114,6 +1334,11 @@ class PipelineService:
         has_assign_in_plan = any("assign" in token for token in term_tokens)
         has_send_in_plan = any("send" in token or "offer" in token or "email" in token for token in term_tokens)
         has_qualify_in_plan = any("qualify" in token or "lead" in token for token in term_tokens)
+
+        if has_send_in_plan and self._message_forbids_send_offers(message):
+            return False
+        if has_qualify_in_plan and self._message_forbids_lead_qualification(message):
+            return False
 
         mentions_users = ("пользоват" in message_lower) or ("user" in message_lower)
         mentions_hotels = ("отел" in message_lower) or ("hotel" in message_lower)
@@ -1160,6 +1385,83 @@ class PipelineService:
 
         indexed.sort(key=lambda row: (row[0], row[1]))
         return [row[2] for row in indexed]
+
+    def _filter_capabilities_by_explicit_plan(
+        self,
+        *,
+        message: str,
+        selected_capabilities: list[SelectedCapability],
+    ) -> list[SelectedCapability]:
+        if len(selected_capabilities) < 2:
+            return selected_capabilities
+
+        ordered_terms = self._extract_user_plan_terms(message)
+        if len(ordered_terms) < 2:
+            return selected_capabilities
+
+        term_keys = [self._normalize_lookup_token(term) for term in ordered_terms]
+        term_keys = [key for key in term_keys if key]
+        if len(term_keys) < 2:
+            return selected_capabilities
+
+        matched: list[SelectedCapability] = []
+        seen_ids: set[str] = set()
+
+        for term_key in term_keys:
+            for item in selected_capabilities:
+                cap_id = str(getattr(item.capability, "id", "") or "").strip()
+                if cap_id and cap_id in seen_ids:
+                    continue
+                aliases = self._capability_aliases(item.capability)
+                if any(term_key in alias or alias in term_key for alias in aliases):
+                    matched.append(item)
+                    if cap_id:
+                        seen_ids.add(cap_id)
+                    break
+
+        # Keep strict plan filtering only when it has useful coverage.
+        if len(matched) >= max(2, len(term_keys) // 2):
+            return matched
+        return selected_capabilities
+
+    def _select_capabilities_by_explicit_plan_terms(
+        self,
+        *,
+        message: str,
+        selected_capabilities: list[SelectedCapability],
+    ) -> list[SelectedCapability]:
+        ordered_terms = self._extract_user_plan_terms(message)
+        if len(ordered_terms) < 2:
+            return []
+
+        term_keys = [self._normalize_lookup_token(term) for term in ordered_terms]
+        term_keys = [key for key in term_keys if key]
+        if len(term_keys) < 2:
+            return []
+
+        result: list[SelectedCapability] = []
+        seen_ids: set[str] = set()
+        for term_key in term_keys:
+            matched_item: SelectedCapability | None = None
+            for item in selected_capabilities:
+                cap_id = str(getattr(item.capability, "id", "") or "").strip()
+                if cap_id and cap_id in seen_ids:
+                    continue
+                aliases = self._capability_aliases(item.capability)
+                if any(term_key in alias or alias in term_key for alias in aliases):
+                    matched_item = item
+                    break
+            if matched_item is None:
+                continue
+            cap_id = str(getattr(matched_item.capability, "id", "") or "").strip()
+            if cap_id:
+                seen_ids.add(cap_id)
+            result.append(matched_item)
+
+        # Require good coverage before enabling strict deterministic plan mode.
+        if len(result) >= max(2, len(term_keys) // 2):
+            return result
+        return []
 
     def _apply_user_plan_order_hint(
         self,
@@ -1266,7 +1568,7 @@ class PipelineService:
         *,
         message: str,
         selected_capabilities: list[SelectedCapability],
-        max_items: int = 4,
+        max_items: int = 8,
     ) -> list[SelectedCapability]:
         if len(selected_capabilities) <= max_items:
             return selected_capabilities
@@ -1443,6 +1745,103 @@ class PipelineService:
         self._sync_node_connections(nodes, normalized_edges)
         self._ensure_external_inputs(nodes, normalized_edges)
         return nodes, normalized_edges
+
+    def _enforce_explicit_plan_step_count(
+        self,
+        *,
+        message: str,
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        terms = self._extract_user_plan_terms(message)
+        if len(terms) < 2:
+            return nodes, edges
+
+        target_steps = len(terms)
+        if target_steps <= 0:
+            return nodes, edges
+
+        sorted_nodes = sorted(
+            [node for node in nodes if isinstance(node.get("step"), int)],
+            key=lambda item: item.get("step", 0),
+        )
+        if not sorted_nodes:
+            return nodes, edges
+
+        trimmed_nodes = sorted_nodes[:target_steps]
+        allowed_steps = {
+            int(node["step"])
+            for node in trimmed_nodes
+            if isinstance(node.get("step"), int)
+        }
+        trimmed_edges = [
+            edge
+            for edge in edges
+            if isinstance(edge.get("from_step"), int)
+            and isinstance(edge.get("to_step"), int)
+            and int(edge.get("from_step")) in allowed_steps
+            and int(edge.get("to_step")) in allowed_steps
+        ]
+
+        trimmed_nodes, trimmed_edges = self._compact_step_sequence(trimmed_nodes, trimmed_edges)
+        self._sync_node_connections(trimmed_nodes, trimmed_edges)
+        self._ensure_external_inputs(trimmed_nodes, trimmed_edges)
+        return trimmed_nodes, trimmed_edges
+
+    def _prune_unsolicited_send_nodes(
+        self,
+        *,
+        message: str,
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+        selected_capabilities: list[SelectedCapability],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        if self._message_requests_send_offers(message):
+            return nodes, edges
+
+        capabilities_by_id = {
+            str(item.capability.id): item.capability for item in selected_capabilities
+        }
+
+        send_steps: set[int] = set()
+        for node in nodes:
+            step = node.get("step")
+            if not isinstance(step, int):
+                continue
+            endpoints = node.get("endpoints")
+            if not isinstance(endpoints, list) or not endpoints:
+                continue
+            endpoint = endpoints[0] if isinstance(endpoints[0], dict) else {}
+            cap_id = str(endpoint.get("capability_id", "") or "").strip()
+            capability = capabilities_by_id.get(cap_id)
+            if capability is None:
+                continue
+            signature = self._fallback_capability_signature(capability)
+            if any(token in signature for token in ("send", "email", "offer")):
+                send_steps.add(step)
+
+        if not send_steps:
+            return nodes, edges
+
+        pruned_nodes = [
+            node
+            for node in nodes
+            if isinstance(node.get("step"), int) and int(node.get("step")) not in send_steps
+        ]
+        pruned_edges = [
+            edge
+            for edge in edges
+            if isinstance(edge.get("from_step"), int)
+            and isinstance(edge.get("to_step"), int)
+            and int(edge.get("from_step")) not in send_steps
+            and int(edge.get("to_step")) not in send_steps
+        ]
+
+        pruned_nodes, pruned_edges = self._prune_disconnected_nodes(pruned_nodes, pruned_edges)
+        pruned_nodes, pruned_edges = self._compact_step_sequence(pruned_nodes, pruned_edges)
+        self._sync_node_connections(pruned_nodes, pruned_edges)
+        self._ensure_external_inputs(pruned_nodes, pruned_edges)
+        return pruned_nodes, pruned_edges
 
     def _selection_is_low_confidence(
         self, selected_capabilities: list[SelectedCapability]
