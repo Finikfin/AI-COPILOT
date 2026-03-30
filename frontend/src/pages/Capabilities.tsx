@@ -40,9 +40,24 @@ import {
 } from '@/components/ui/dialog';
 import { createCompositeCapability } from '@/api/capabilities';
 import { toast } from 'sonner';
+import { useAuth } from '@/contexts/AuthContext';
+import { listDialogCapabilityFolders } from '@/lib/dialogCapabilityFolders';
+
+type CapabilityCardItem = {
+  capability: any;
+  associatedActions: any[];
+};
+
+type CapabilityGroup = {
+  key: string;
+  title: string;
+  subtitle?: string;
+  items: CapabilityCardItem[];
+};
 
 const Capabilities: React.FC = () => {
   const { actions, capabilities, filteredCapabilities, searchTerm, setSearchTerm, addCapabilities } = useActionsContext();
+  const { user } = useAuth();
   const [isCompositeDialogOpen, setIsCompositeDialogOpen] = React.useState(false);
   const [isCreatingComposite, setIsCreatingComposite] = React.useState(false);
   const [compositeName, setCompositeName] = React.useState('');
@@ -60,28 +75,69 @@ const Capabilities: React.FC = () => {
     }
   };
 
-  const groupedCapabilities = React.useMemo(() => {
-    return filteredCapabilities.reduce((acc, cap) => {
-      const isComposite = String(cap.type || 'ATOMIC').toUpperCase() === 'COMPOSITE';
-      
-      const associatedActions = isComposite
-        ? (cap.recipe?.steps || [])
-            .map(step => {
-              const stepCap = capabilities.find(c => c.id === step.capability_id);
-              return actions.find(a => a.id === stepCap?.action_id);
-            })
-            .filter((a): a is typeof actions[0] => !!a)
-        : actions.filter(a => a.id === cap.action_id);
+  const getAssociatedActions = React.useCallback((cap: any) => {
+    const isComposite = String(cap.type || 'ATOMIC').toUpperCase() === 'COMPOSITE';
+    return isComposite
+      ? (cap.recipe?.steps || [])
+          .map((step: any) => {
+            const stepCap = capabilities.find((c) => c.id === step.capability_id);
+            return actions.find((a) => a.id === stepCap?.action_id);
+          })
+          .filter((a: any) => !!a)
+      : actions.filter((a) => a.id === cap.action_id);
+  }, [actions, capabilities]);
 
-      const action = associatedActions[0];
-      const filename = isComposite
-        ? 'Composite Capabilities'
-        : action?.source_filename || 'General Capabilities';
-      if (!acc[filename]) acc[filename] = [];
-      acc[filename].push({ capability: cap, associatedActions });
-      return acc;
-    }, {} as Record<string, Array<{ capability: typeof filteredCapabilities[0], associatedActions: typeof actions }>>);
-  }, [actions, capabilities, filteredCapabilities]);
+  const groupedCapabilities = React.useMemo<CapabilityGroup[]>(() => {
+    const capabilityById = new Map(filteredCapabilities.map((cap) => [String(cap.id), cap]));
+    const folders = listDialogCapabilityFolders(user?.id);
+    const groups: CapabilityGroup[] = [];
+    const assignedIds = new Set<string>();
+
+    for (const folder of folders) {
+      const folderCaps = folder.capabilityIds
+        .map((id) => capabilityById.get(String(id)))
+        .filter((cap): cap is NonNullable<typeof cap> => !!cap);
+
+      if (folderCaps.length === 0) {
+        continue;
+      }
+
+      const items = folderCaps.map((cap) => {
+        assignedIds.add(String(cap.id));
+        return {
+          capability: cap,
+          associatedActions: getAssociatedActions(cap),
+        };
+      });
+
+      groups.push({
+        key: `chat:${folder.dialogId}`,
+        title: folder.folderName,
+        subtitle: folder.fileNames.length > 0
+          ? `${folder.fileNames.join(', ')} | ${folder.dialogId.slice(0, 8)}`
+          : `dialog: ${folder.dialogId.slice(0, 8)}`,
+        items,
+      });
+    }
+
+    const unassigned = filteredCapabilities
+      .filter((cap) => !assignedIds.has(String(cap.id)))
+      .map((cap) => ({
+        capability: cap,
+        associatedActions: getAssociatedActions(cap),
+      }));
+
+    if (unassigned.length > 0) {
+      groups.push({
+        key: 'unassigned',
+        title: 'Other Capabilities',
+        subtitle: 'Not attached to a specific chat folder',
+        items: unassigned,
+      });
+    }
+
+    return groups;
+  }, [filteredCapabilities, user?.id, getAssociatedActions]);
 
   const atomicCapabilities = React.useMemo(() => {
     return capabilities.filter((cap) => String(cap.type || 'ATOMIC').toUpperCase() === 'ATOMIC');
@@ -193,22 +249,27 @@ const Capabilities: React.FC = () => {
 
       {/* Grid Section - Grouped by Folders */}
       <div className="flex-1 min-h-0 overflow-auto pr-2 custom-scrollbar">
-        {Object.keys(groupedCapabilities).length > 0 ? (
-          <Accordion type="multiple" defaultValue={Object.keys(groupedCapabilities)} className="space-y-6 pb-10">
-            {Object.entries(groupedCapabilities).map(([filename, items]) => (
-              <AccordionItem key={filename} value={filename} className="border-none">
+        {groupedCapabilities.length > 0 ? (
+          <Accordion type="multiple" defaultValue={groupedCapabilities.map((group) => group.key)} className="space-y-6 pb-10">
+            {groupedCapabilities.map((group) => (
+              <AccordionItem key={group.key} value={group.key} className="border-none">
                 <AccordionTrigger className="hover:no-underline py-2 mb-4 group border-b border-border/50">
                   <div className="flex items-center gap-2">
                     <FolderIcon className="h-4 w-4 text-primary opacity-70 group-hover:scale-110 transition-transform" />
-                    <span className="text-sm font-bold text-foreground tracking-tight">{filename}</span>
+                    <span className="text-sm font-bold text-foreground tracking-tight">{group.title}</span>
                     <Badge variant="secondary" className="ml-2 text-[10px] px-1.5 py-0 bg-primary/5 text-primary border-primary/10">
-                      {items.length}
+                      {group.items.length}
                     </Badge>
+                    {group.subtitle && (
+                      <span className="ml-2 text-[11px] text-muted-foreground truncate max-w-[420px]">
+                        {group.subtitle}
+                      </span>
+                    )}
                   </div>
                 </AccordionTrigger>
                 <AccordionContent className="pt-2 pb-6">
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
-                    {items.map(({ capability: cap, associatedActions }) => (
+                    {group.items.map(({ capability: cap, associatedActions }) => (
                       <Card key={cap.id} className="bg-card border-border hover:border-primary/50 transition-all group overflow-hidden flex flex-col h-full min-h-[180px] shadow-sm hover:shadow-md">
                         <CardHeader className="p-4 pb-2">
                           <div className="flex items-start justify-between gap-2">

@@ -17,6 +17,11 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useActionsContext } from '@/contexts/ActionContext';
 import { SwaggerImportModal } from '@/components/shared/SwaggerImportModal';
 import { Action, Capability } from '@/types/action';
+import {
+  ensureDialogCapabilityFolder,
+  getDialogCapabilityFolder,
+  upsertDialogCapabilityFolder,
+} from '@/lib/dialogCapabilityFolders';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -74,6 +79,8 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
   const [isHydrating, setIsHydrating] = useState(true);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [importDialogId, setImportDialogId] = useState<string | null>(initialDialogId || null);
+  const [dialogFolderFileNames, setDialogFolderFileNames] = useState<string[]>([]);
+  const [dialogFolderCapabilityIds, setDialogFolderCapabilityIds] = useState<string[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const initialMessageProcessed = useRef(false);
   const storageKey = useMemo(() => buildDialogStorageKey(user?.id), [user?.id]);
@@ -83,6 +90,17 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages]);
+
+  useEffect(() => {
+    if (!dialogId) {
+      setDialogFolderFileNames([]);
+      setDialogFolderCapabilityIds([]);
+      return;
+    }
+    const folder = getDialogCapabilityFolder(dialogId, user?.id);
+    setDialogFolderFileNames(folder?.fileNames || []);
+    setDialogFolderCapabilityIds(folder?.capabilityIds || []);
+  }, [dialogId, user?.id]);
 
   useEffect(() => {
     // Clear pipeline when switching to a new dialog to prevent state contamination
@@ -132,6 +150,10 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
 
       setDialogId(activeDialogId);
       localStorage.setItem(storageKey, activeDialogId);
+      ensureDialogCapabilityFolder({
+        dialogId: activeDialogId,
+        userId: user?.id,
+      });
 
       if (!shouldLoadHistory) {
         setMessages([{ role: 'assistant', content: DEFAULT_ASSISTANT_MESSAGE }]);
@@ -214,8 +236,12 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
     const newDialogId = generateUUID();
     setDialogId(newDialogId);
     localStorage.setItem(storageKey, newDialogId);
+    ensureDialogCapabilityFolder({
+      dialogId: newDialogId,
+      userId: user?.id,
+    });
     return newDialogId;
-  }, [dialogId, storageKey]);
+  }, [dialogId, storageKey, user?.id]);
 
   const handleSend = useCallback(
     async (overrideValue?: string) => {
@@ -243,7 +269,7 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
         const response = await generatePipeline({
           dialog_id: activeDialogId,
           message: userMessage,
-          capability_ids: null,
+          capability_ids: dialogFolderCapabilityIds.length > 0 ? dialogFolderCapabilityIds : null,
         });
 
         setMessages((prev) => {
@@ -301,7 +327,7 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
         setIsTyping(false);
       }
     },
-    [ensureDialogId, inputValue, isHydrating, isTyping, onSynthesize, setPipeline]
+    [dialogFolderCapabilityIds, ensureDialogId, inputValue, isHydrating, isTyping, onSynthesize, setPipeline]
   );
 
   const handleOpenImport = useCallback(() => {
@@ -335,9 +361,15 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
     setDialogId(newDialogId);
     setImportDialogId(newDialogId);
     localStorage.setItem(storageKey, newDialogId);
+    ensureDialogCapabilityFolder({
+      dialogId: newDialogId,
+      userId: user?.id,
+    });
     setMessages([{ role: 'assistant', content: DEFAULT_ASSISTANT_MESSAGE }]);
     setPipeline(null);
     setInputValue('');
+    setDialogFolderFileNames([]);
+    setDialogFolderCapabilityIds([]);
   };
 
   return (
@@ -424,6 +456,11 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
             >
               <FileCode2 className="h-3 w-3" /> Import OpenAPI
             </Button>
+            {dialogFolderFileNames.length > 0 && (
+              <Badge variant="secondary" className="text-[10px]">
+                Folder: {dialogFolderFileNames.length} file(s), {dialogFolderCapabilityIds.length} cap(s)
+              </Badge>
+            )}
           </div>
         )}
         {messages.length <= 1 && (
@@ -436,6 +473,11 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
             >
               <FileCode2 className="h-3 w-3" /> Import OpenAPI
             </Button>
+            {dialogFolderFileNames.length > 0 && (
+              <Badge variant="secondary" className="text-[10px]">
+                Folder: {dialogFolderFileNames.length} file(s), {dialogFolderCapabilityIds.length} cap(s)
+              </Badge>
+            )}
           </div>
         )}
         <div className="relative">
@@ -468,6 +510,7 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
         onImport={(data, filename) => {
           const importedActions = (data?.succeeded_actions || data?.actions || []) as Action[];
           const importedCapabilities = (data?.capabilities || []) as Capability[];
+          const activeDialogId = importDialogId || dialogId || ensureDialogId();
 
           if (importedActions.length > 0) {
             addActions(importedActions);
@@ -476,13 +519,24 @@ export const SynthesisChat: React.FC<SynthesisChatProps> = ({
             addCapabilities(importedCapabilities);
           }
 
+          const folder = upsertDialogCapabilityFolder({
+            dialogId: activeDialogId,
+            userId: user?.id,
+            fileName: filename || 'specification',
+            capabilityIds: importedCapabilities
+              .map((cap) => String(cap?.id || '').trim())
+              .filter(Boolean),
+          });
+          setDialogFolderFileNames(folder.fileNames);
+          setDialogFolderCapabilityIds(folder.capabilityIds);
+
           const importedLabel = filename || 'specification';
           const importedCount = importedCapabilities.length || importedActions.length;
           setMessages((prev) => [
             ...prev,
             {
               role: 'assistant',
-              content: `Импортировано из ${importedLabel}: ${importedCount} элементов. Теперь можно строить новый граф в этом чате.`,
+              content: `Импортировано из ${importedLabel}: ${importedCount} элементов. Создана папка capabilities для этого чата.`,
             },
           ]);
         }}

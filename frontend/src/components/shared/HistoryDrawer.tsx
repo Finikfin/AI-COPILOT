@@ -6,7 +6,12 @@ import {
   Workflow,
   ChevronRight,
   Search,
-  X
+  X,
+  Pencil,
+  Trash2,
+  GripVertical,
+  Check,
+  X as CancelIcon,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -18,6 +23,16 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn, generateUUID } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
+import {
+  deleteDialogLocally,
+  ensureDialogCapabilityFolder,
+  getDialogCapabilityFolder,
+  moveDialogInOrder,
+  setDialogCapabilityFolderName,
+  syncDialogOrder,
+  getHiddenDialogIds,
+} from '@/lib/dialogCapabilityFolders';
+import { useAuth } from '@/contexts/AuthContext';
 
 import { useQuery } from '@tanstack/react-query';
 
@@ -28,7 +43,12 @@ interface HistoryDrawerProps {
 
 export const HistoryDrawer: React.FC<HistoryDrawerProps> = ({ isOpen, onClose }) => {
   const [searchQuery, setSearchQuery] = useState('');
+  const [editingDialogId, setEditingDialogId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState('');
+  const [draggedDialogId, setDraggedDialogId] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   const {
     data: dialogs = [],
@@ -41,10 +61,101 @@ export const HistoryDrawer: React.FC<HistoryDrawerProps> = ({ isOpen, onClose })
     refetchInterval: 5000, // Refresh every 5 seconds for real-time feel
   });
 
-  const filteredDialogs = dialogs.filter(dialog =>
-    dialog.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    dialog.last_message_preview?.toLowerCase().includes(searchQuery.toLowerCase())
+  const hiddenDialogIds = new Set(getHiddenDialogIds(user?.id));
+  const visibleDialogs = dialogs.filter((dialog) => !hiddenDialogIds.has(dialog.dialog_id));
+
+  const orderedDialogIds = syncDialogOrder(
+    visibleDialogs.map((dialog) => dialog.dialog_id),
+    user?.id,
   );
+
+  const orderedDialogs = orderedDialogIds
+    .map((dialogId) => visibleDialogs.find((dialog) => dialog.dialog_id === dialogId))
+    .filter((dialog): dialog is PipelineDialogListItem => !!dialog);
+
+  const filteredDialogs = orderedDialogs.filter(dialog => {
+    const displayName = getDialogCapabilityFolder(dialog.dialog_id, user?.id)?.folderName || dialog.title || 'Новый диалог';
+    return (
+      displayName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (dialog.last_message_preview || '').toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  });
+
+  useEffect(() => {
+    if (!isOpen || dialogs.length === 0) {
+      return;
+    }
+
+    for (const dialog of dialogs) {
+      ensureDialogCapabilityFolder({
+        dialogId: dialog.dialog_id,
+        userId: user?.id,
+      });
+    }
+    setRefreshKey((value) => value + 1);
+  }, [dialogs, isOpen, user?.id]);
+
+  const getDialogDisplayName = (dialogId: string, defaultTitle: string) => {
+    const folder = getDialogCapabilityFolder(dialogId, user?.id);
+    return folder?.folderName || defaultTitle || 'Новый диалог';
+  };
+
+  const startRename = (dialogId: string, currentName: string) => {
+    setEditingDialogId(dialogId);
+    setEditingName(currentName);
+  };
+
+  const saveRename = (dialogId: string) => {
+    const nextName = String(editingName || '').trim();
+    if (!nextName) {
+      return;
+    }
+    setDialogCapabilityFolderName({
+      dialogId,
+      userId: user?.id,
+      folderName: nextName,
+    });
+    setEditingDialogId(null);
+    setEditingName('');
+    setRefreshKey((value) => value + 1);
+  };
+
+  const cancelRename = () => {
+    setEditingDialogId(null);
+    setEditingName('');
+  };
+
+  const handleDeleteDialog = (dialogId: string) => {
+    const confirmed = window.confirm('Удалить чат из истории?');
+    if (!confirmed) {
+      return;
+    }
+
+    deleteDialogLocally(dialogId, user?.id);
+    if (editingDialogId === dialogId) {
+      cancelRename();
+    }
+    setRefreshKey((value) => value + 1);
+  };
+
+  const handleDragStart = (dialogId: string) => {
+    setDraggedDialogId(dialogId);
+  };
+
+  const handleDrop = (targetDialogId: string) => {
+    if (!draggedDialogId || draggedDialogId === targetDialogId) {
+      setDraggedDialogId(null);
+      return;
+    }
+
+    moveDialogInOrder({
+      draggedDialogId,
+      targetDialogId,
+      userId: user?.id,
+    });
+    setDraggedDialogId(null);
+    setRefreshKey((value) => value + 1);
+  };
 
   const handleOpenDialog = (dialogId: string) => {
     // Save to localStorage so SynthesisChat knows which one to load
@@ -124,21 +235,81 @@ export const HistoryDrawer: React.FC<HistoryDrawerProps> = ({ isOpen, onClose })
                   ))
                 ) : filteredDialogs.length > 0 ? (
                   filteredDialogs.map((dialog) => (
-                    <button
+                    <div
                       key={dialog.dialog_id}
-                      onClick={() => handleOpenDialog(dialog.dialog_id)}
-                      className="w-full text-left p-2.5 rounded-xl transition-all hover:bg-muted/50 group relative overflow-hidden"
+                      draggable
+                      onDragStart={() => handleDragStart(dialog.dialog_id)}
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={() => handleDrop(dialog.dialog_id)}
+                      className={cn(
+                        'w-full text-left p-2.5 rounded-xl transition-all hover:bg-muted/50 group relative overflow-hidden',
+                        draggedDialogId === dialog.dialog_id && 'opacity-50'
+                      )}
                     >
-                      <div className="flex gap-3 relative z-10">
-                        <div className="w-8 h-8 rounded-lg bg-primary/5 border border-primary/10 flex items-center justify-center shrink-0 group-hover:bg-primary/10 transition-colors">
+                      <div className="flex gap-2 items-start relative z-10">
+                        <button
+                          type="button"
+                          className="mt-1 text-muted-foreground/60 hover:text-muted-foreground"
+                          title="Перетащить"
+                        >
+                          <GripVertical className="h-4 w-4" />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleOpenDialog(dialog.dialog_id)}
+                          className="w-8 h-8 rounded-lg bg-primary/5 border border-primary/10 flex items-center justify-center shrink-0 group-hover:bg-primary/10 transition-colors"
+                        >
                           <MessageSquare className="h-4 w-4 text-primary/70 group-hover:text-primary transition-colors" />
-                        </div>
+                        </button>
 
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between gap-2 mb-0.5">
-                            <span className="text-xs font-semibold text-foreground truncate block group-hover:text-primary transition-colors">
-                              {dialog.title || 'Новый диалог'}
-                            </span>
+                            {editingDialogId === dialog.dialog_id ? (
+                              <div className="flex items-center gap-1 w-full">
+                                <Input
+                                  autoFocus
+                                  value={editingName}
+                                  onChange={(event) => setEditingName(event.target.value)}
+                                  onKeyDown={(event) => {
+                                    if (event.key === 'Enter') {
+                                      saveRename(dialog.dialog_id);
+                                    }
+                                    if (event.key === 'Escape') {
+                                      cancelRename();
+                                    }
+                                  }}
+                                  className="h-7 text-xs"
+                                />
+                                <Button
+                                  type="button"
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-6 w-6"
+                                  onClick={() => saveRename(dialog.dialog_id)}
+                                >
+                                  <Check className="h-3.5 w-3.5" />
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-6 w-6"
+                                  onClick={cancelRename}
+                                >
+                                  <CancelIcon className="h-3.5 w-3.5" />
+                                </Button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleOpenDialog(dialog.dialog_id)}
+                                className="text-xs font-semibold text-foreground truncate block group-hover:text-primary transition-colors text-left"
+                                title={getDialogDisplayName(dialog.dialog_id, dialog.title)}
+                              >
+                                {getDialogDisplayName(dialog.dialog_id, dialog.title)}
+                              </button>
+                            )}
                             <span className="text-[9px] text-muted-foreground whitespace-nowrap">
                               {format(new Date(dialog.updated_at), 'HH:mm', { locale: ru })}
                             </span>
@@ -156,13 +327,33 @@ export const HistoryDrawer: React.FC<HistoryDrawerProps> = ({ isOpen, onClose })
                                 Flow
                               </span>
                             )}
+                            {editingDialogId !== dialog.dialog_id && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => startRename(dialog.dialog_id, getDialogDisplayName(dialog.dialog_id, dialog.title))}
+                                  className="text-muted-foreground hover:text-foreground"
+                                  title="Переименовать"
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteDialog(dialog.dialog_id)}
+                                  className="text-rose-500/80 hover:text-rose-500"
+                                  title="Удалить"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </>
+                            )}
                             <span className="text-blue-500/70 opacity-0 group-hover:opacity-100 transition-opacity text-[9px] font-medium ml-auto flex items-center gap-0.5">
                               Открыть <ChevronRight className="h-2.5 w-2.5" />
                             </span>
                           </div>
                         </div>
                       </div>
-                    </button>
+                    </div>
                   ))
                 ) : (
                   <div className="p-8 text-center space-y-2">

@@ -259,6 +259,12 @@ class PipelineService:
             edges=normalized_edges,
             selected_capabilities=selected_capabilities,
         )
+        normalized_nodes, normalized_edges = self._prune_unsolicited_assign_nodes(
+            message=message,
+            nodes=normalized_nodes,
+            edges=normalized_edges,
+            selected_capabilities=selected_capabilities,
+        )
 
         if len(selected_capabilities) >= 4 and len(normalized_nodes) < 3:
             top_capabilities = self._select_fallback_capabilities(
@@ -293,6 +299,12 @@ class PipelineService:
                     edges=fallback_edges,
                 )
                 fallback_nodes, fallback_edges = self._prune_unsolicited_send_nodes(
+                    message=message,
+                    nodes=fallback_nodes,
+                    edges=fallback_edges,
+                    selected_capabilities=top_capabilities,
+                )
+                fallback_nodes, fallback_edges = self._prune_unsolicited_assign_nodes(
                     message=message,
                     nodes=fallback_nodes,
                     edges=fallback_edges,
@@ -340,6 +352,12 @@ class PipelineService:
                     edges=fallback_edges,
                 )
                 fallback_nodes, fallback_edges = self._prune_unsolicited_send_nodes(
+                    message=message,
+                    nodes=fallback_nodes,
+                    edges=fallback_edges,
+                    selected_capabilities=top_capabilities,
+                )
+                fallback_nodes, fallback_edges = self._prune_unsolicited_assign_nodes(
                     message=message,
                     nodes=fallback_nodes,
                     edges=fallback_edges,
@@ -1011,6 +1029,9 @@ class PipelineService:
         mentions_send = any(
             keyword in user_query_lower for keyword in ["send", "offer", "email", "разосл", "письм"]
         )
+        mentions_assign = any(
+            keyword in user_query_lower for keyword in ["assign", "назнач", "назначи", "назначить", "назначения"]
+        )
         if self._message_forbids_send_offers(user_query):
             mentions_send = False
         mentions_qualify = any(
@@ -1024,15 +1045,25 @@ class PipelineService:
                 "- Step 1: get recently active users\n"
                 "- Step 2: get top hotels\n"
                 "- Step 3: segment users by hotel interests (consumes 1+2)\n"
-                "- Step 4: assign specific hotels to users (consumes 3)\n"
             )
+            if mentions_assign:
+                instruction += "- Step 4: assign specific hotels to users (consumes 3)\n"
             if mentions_send:
-                instruction += "- Step 5: send personalized offers to users (consumes 4)\n"
+                if mentions_assign:
+                    instruction += "- Step 5: send personalized offers to users (consumes 4)\n"
+                else:
+                    instruction += "- Step 4: send personalized offers to users (consumes 3)\n"
             if mentions_qualify and not forbid_qualify:
                 if mentions_send:
-                    instruction += "- Step 6: evaluate lead quality (consumes 5 and/or 4)\n"
+                    if mentions_assign:
+                        instruction += "- Step 6: evaluate lead quality (consumes 5 and/or 4)\n"
+                    else:
+                        instruction += "- Step 5: evaluate lead quality (consumes 4 and/or 3)\n"
                 else:
-                    instruction += "- Step 5: evaluate lead quality (consumes 4)\n"
+                    if mentions_assign:
+                        instruction += "- Step 5: evaluate lead quality (consumes 4)\n"
+                    else:
+                        instruction += "- Step 4: evaluate lead quality (consumes 3)\n"
 
         ordered_terms = self._extract_user_plan_terms(user_query)
         if ordered_terms:
@@ -1244,6 +1275,13 @@ class PipelineService:
         return any(
             token in message_lower
             for token in ["send", "email", "offer", "почт", "разосл", "письм", "присыл"]
+        )
+
+    def _message_requests_assign_stage(self, message: str) -> bool:
+        message_lower = (message or "").lower()
+        return any(
+            token in message_lower
+            for token in ["assign", "назнач", "назначи", "назначить", "назначения"]
         )
 
     def _message_requests_lead_qualification(self, message: str) -> bool:
@@ -1835,6 +1873,61 @@ class PipelineService:
             and isinstance(edge.get("to_step"), int)
             and int(edge.get("from_step")) not in send_steps
             and int(edge.get("to_step")) not in send_steps
+        ]
+
+        pruned_nodes, pruned_edges = self._prune_disconnected_nodes(pruned_nodes, pruned_edges)
+        pruned_nodes, pruned_edges = self._compact_step_sequence(pruned_nodes, pruned_edges)
+        self._sync_node_connections(pruned_nodes, pruned_edges)
+        self._ensure_external_inputs(pruned_nodes, pruned_edges)
+        return pruned_nodes, pruned_edges
+
+    def _prune_unsolicited_assign_nodes(
+        self,
+        *,
+        message: str,
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+        selected_capabilities: list[SelectedCapability],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        if self._message_requests_assign_stage(message):
+            return nodes, edges
+
+        capabilities_by_id = {
+            str(item.capability.id): item.capability for item in selected_capabilities
+        }
+
+        assign_steps: set[int] = set()
+        for node in nodes:
+            step = node.get("step")
+            if not isinstance(step, int):
+                continue
+            endpoints = node.get("endpoints")
+            if not isinstance(endpoints, list) or not endpoints:
+                continue
+            endpoint = endpoints[0] if isinstance(endpoints[0], dict) else {}
+            cap_id = str(endpoint.get("capability_id", "") or "").strip()
+            capability = capabilities_by_id.get(cap_id)
+            if capability is None:
+                continue
+            signature = self._fallback_capability_signature(capability)
+            if "assign" in signature:
+                assign_steps.add(step)
+
+        if not assign_steps:
+            return nodes, edges
+
+        pruned_nodes = [
+            node
+            for node in nodes
+            if isinstance(node.get("step"), int) and int(node.get("step")) not in assign_steps
+        ]
+        pruned_edges = [
+            edge
+            for edge in edges
+            if isinstance(edge.get("from_step"), int)
+            and isinstance(edge.get("to_step"), int)
+            and int(edge.get("from_step")) not in assign_steps
+            and int(edge.get("to_step")) not in assign_steps
         ]
 
         pruned_nodes, pruned_edges = self._prune_disconnected_nodes(pruned_nodes, pruned_edges)

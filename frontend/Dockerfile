@@ -21,6 +21,9 @@ FROM nginx:stable-alpine
 # Copy built assets from build stage
 COPY --from=build /app/dist /usr/share/nginx/html
 
+# Copy swagger file to be served as static file
+COPY --from=build /app/public/base-swagger.yaml /usr/share/nginx/html/base-swagger.yaml
+
 # Copy custom nginx config
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 

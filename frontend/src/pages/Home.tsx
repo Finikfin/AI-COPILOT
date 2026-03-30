@@ -14,6 +14,8 @@ import {
 } from "@/components/ui/tooltip";
 import { generateUUID, cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useAuth } from '@/contexts/AuthContext';
+import { ensureDialogCapabilityFolder, upsertDialogCapabilityFolder } from '@/lib/dialogCapabilityFolders';
 
 const Home: React.FC = () => {
   const COPY_PROMPT_TEXT = `нужно
@@ -25,6 +27,7 @@ const Home: React.FC = () => {
 Оценить качество лидов`;
 
   const { addActions, addCapabilities, capabilities } = useActionsContext();
+  const { user } = useAuth();
   const [homeDialogId, setHomeDialogId] = useState<string | null>(null);
   const [importDialogId, setImportDialogId] = useState<string | null>(null);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
@@ -41,6 +44,10 @@ const Home: React.FC = () => {
     }
     const next = generateUUID();
     setHomeDialogId(next);
+    ensureDialogCapabilityFolder({
+      dialogId: next,
+      userId: user?.id,
+    });
     return next;
   };
 
@@ -77,6 +84,35 @@ const Home: React.FC = () => {
       await navigator.clipboard.writeText(COPY_PROMPT_TEXT);
     } catch (_error) {
       // Clipboard may be unavailable in non-secure contexts; input is still filled.
+    }
+  };
+
+  const handleDownloadSwagger = async (event?: React.MouseEvent<HTMLButtonElement>) => {
+    event?.preventDefault();
+    event?.stopPropagation();
+
+    try {
+      const response = await fetch('/base-swagger.yaml');
+      const yamlText = await response.text();
+      
+      // Replace external URLs with relative path (works for any domain)
+      const updatedYaml = yamlText.replace(
+        /url: http:\/\/84\.201\.161\.175:8010/g,
+        'url: /api'
+      );
+      
+      // Create blob and download
+      const blob = new Blob([updatedYaml], { type: 'application/x-yaml' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'swagger.yaml';
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error('Ошибка при скачивании свагера:', error);
     }
   };
 
@@ -190,6 +226,7 @@ const Home: React.FC = () => {
           <div className="flex flex-wrap items-center justify-center gap-4 mt-6">
             <Button
               variant="outline"
+              type="button"
               className="gap-2 border-border bg-card/50 backdrop-blur-sm hover:bg-accent transition-all animate-in fade-in zoom-in duration-500 delay-300"
               onClick={handleOpenImportModal}
             >
@@ -198,19 +235,16 @@ const Home: React.FC = () => {
             </Button>
             <Button
               variant="outline"
+              type="button"
               className="gap-2 border-border bg-card/50 backdrop-blur-sm hover:bg-accent transition-all animate-in fade-in zoom-in duration-500 delay-350"
-              asChild
+              onClick={handleDownloadSwagger}
             >
-              <a 
-                href="https://gitlab.prodcontest.com/team-29/backend/-/raw/master/result.yaml?ref_type=heads&inline=false" 
-                download="swagger.yaml"
-              >
-                <Download className="h-4 w-4 text-primary" />
-                Download base swagger
-              </a>
+              <Download className="h-4 w-4 text-primary" />
+              Download base swagger
             </Button>
             <Button
               variant="outline"
+              type="button"
               className="gap-2 border-border bg-card/50 backdrop-blur-sm hover:bg-accent transition-all animate-in fade-in zoom-in duration-500 delay-400"
               onClick={handleCopyPrompt}
             >
@@ -256,6 +290,7 @@ const Home: React.FC = () => {
         dialogId={importDialogId || homeDialogId || undefined}
         onImport={(data, filename) => {
           if (data && (data.succeeded_actions || data.actions)) {
+            const activeDialogId = importDialogId || homeDialogId || ensureHomeDialogId();
             const successList = data.succeeded_actions || data.actions || [];
             const failedList = data.failed_actions || [];
             const capabilitiesList = data.capabilities || [];
@@ -271,6 +306,15 @@ const Home: React.FC = () => {
             } else {
               setImportedFiles(prev => [...prev, 'manual_import.json']);
             }
+
+            upsertDialogCapabilityFolder({
+              dialogId: activeDialogId,
+              userId: user?.id,
+              fileName: filename || 'manual_import.json',
+              capabilityIds: capabilitiesList
+                .map((cap: { id?: string }) => String(cap?.id || '').trim())
+                .filter(Boolean),
+            });
 
             setImportResults({
               succeeded_actions: successList,
